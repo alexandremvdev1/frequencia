@@ -284,3 +284,13 @@ LOGGING = {
 # Campo id padrão
 # =========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# === FORÇA SAFE MODE PARA ESTÁTICOS NO RENDER ===
+# Garante que NADA volte para Manifest durante o collectstatic.
+# Deixe aqui no final do arquivo.
+from django.conf import settings as _s
+
+_s.STORAGES["staticfiles"] = {
+    "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"
+}
+_s.STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
