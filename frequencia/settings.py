@@ -44,6 +44,31 @@ if RENDER_EXTERNAL_HOSTNAME:
     if origin not in CSRF_TRUSTED_ORIGINS:
         CSRF_TRUSTED_ORIGINS.append(origin)
 
+
+# =========================
+# Cloudinary – detectar cedo para controlar INSTALLED_APPS
+# =========================
+CLOUDINARY_URL_ENV = os.getenv("CLOUDINARY_URL")
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+CLOUDINARY_AVAILABLE = False
+try:
+    import cloudinary  # noqa
+    import cloudinary_storage  # noqa
+    CLOUDINARY_AVAILABLE = True
+except Exception:
+    CLOUDINARY_AVAILABLE = False
+
+USE_CLOUDINARY = (
+    CLOUDINARY_AVAILABLE and (
+        bool(CLOUDINARY_URL_ENV) or
+        all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET])
+    )
+)
+
+
 # =========================
 # Apps
 # =========================
@@ -57,19 +82,12 @@ BASE_DJANGO_APPS = [
 ]
 LOCAL_APPS = ["controle.apps.ControleConfig"]
 
-# Cloudinary opcional
-CLOUDINARY_AVAILABLE = False
-try:
-    import cloudinary  # noqa
-    import cloudinary_storage  # noqa
-    CLOUDINARY_AVAILABLE = True
-except Exception:
-    CLOUDINARY_AVAILABLE = False
-
-if CLOUDINARY_AVAILABLE:
+# Só inclui cloudinary* se realmente for usar (evita comando collectstatic custom)
+if USE_CLOUDINARY:
     INSTALLED_APPS = ["cloudinary_storage"] + BASE_DJANGO_APPS + ["cloudinary"] + LOCAL_APPS
 else:
     INSTALLED_APPS = BASE_DJANGO_APPS + LOCAL_APPS
+
 
 # =========================
 # Middleware
@@ -87,6 +105,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "frequencia.urls"
+
 
 # =========================
 # Templates
@@ -110,6 +129,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "frequencia.wsgi.application"
 ASGI_APPLICATION = "frequencia.asgi.application"
 
+
 # =========================
 # Banco de Dados
 # =========================
@@ -121,7 +141,7 @@ if DATABASE_URL:
         "default": dj_database_url.parse(
             DATABASE_URL,
             conn_max_age=600,
-            ssl_require=True,  # força TLS mesmo se a URL não tiver ?sslmode=require
+            ssl_require=True,  # força TLS mesmo sem ?sslmode=require
         )
     }
 else:
@@ -131,6 +151,7 @@ else:
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
+
 
 # =========================
 # Validação de senhas
@@ -142,13 +163,15 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+
 # =========================
 # i18n / timezone
 # =========================
 LANGUAGE_CODE = "pt-br"
-TIME_ZONE = "America/Araguaina"  # região do Tocantins; use "America/Fortaleza" se preferir
+TIME_ZONE = "America/Araguaina"  # ou "America/Fortaleza"
 USE_I18N = True
 USE_TZ = True
+
 
 # =========================
 # Estáticos / mídia
@@ -164,41 +187,29 @@ MEDIA_ROOT = BASE_DIR / "media"
 # WhiteNoise (dev ajuda / prod eficiente)
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_USE_FINDERS = DEBUG
-# Mantém só arquivos com hash no collectstatic (mais limpo em prod)
-# WHITENOISE_KEEP_ONLY_HASHED_FILES = True
+# WHITENOISE_KEEP_ONLY_HASHED_FILES = True  # opcional em prod
+
 
 # =========================
-# Cloudinary opcional (mídia)
+# STORAGES (Django 5) + aliases legados p/ compatibilidade
 # =========================
-CLOUDINARY_URL_ENV = os.getenv("CLOUDINARY_URL")
-CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
-CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
-CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
-
-USE_CLOUDINARY = (
-    CLOUDINARY_AVAILABLE and (
-        bool(CLOUDINARY_URL_ENV) or
-        all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET])
-    )
-)
-
 if USE_CLOUDINARY:
-    if not CLOUDINARY_URL_ENV:
-        CLOUDINARY_STORAGE = {
-            "CLOUD_NAME": CLOUDINARY_CLOUD_NAME,
-            "API_KEY": CLOUDINARY_API_KEY,
-            "API_SECRET": CLOUDINARY_API_SECRET,
-        }
     STORAGES = {
         "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
-        # estáticos: WhiteNoise (mais simples)
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
+    # Aliases legados para libs que ainda leem esses names:
+    DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 else:
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
+    # Aliases legados (evitam AttributeError em libs antigas)
+    DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 
 # =========================
 # Auth / Login
@@ -207,11 +218,13 @@ LOGIN_URL = os.getenv("LOGIN_URL", "controle:login")
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "controle:painel_controle")
 LOGOUT_REDIRECT_URL = os.getenv("LOGOUT_REDIRECT_URL", "controle:login")
 
+
 # =========================
 # E-mail
 # =========================
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@example.com")
+
 
 # =========================
 # Segurança prod
@@ -222,13 +235,28 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     X_FRAME_OPTIONS = "DENY"
-    # HSTS (recomendado em produção com HTTPS)
+    # HSTS
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))  # 1 ano
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    # SameSite padrão
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
+
+
+# =========================
+# Logging básico p/ ver nos logs do Render
+# =========================
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
 
 # =========================
 # Campo id padrão
