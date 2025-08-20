@@ -1,22 +1,29 @@
 """
 Django settings for frequencia project.
-Gerado pelo Django 5.1+ — app 'controle' + Cloudinary opcional + WhiteNoise.
+Gerado pelo Django 5.2.x — app 'controle' + Cloudinary opcional + WhiteNoise.
 """
 from pathlib import Path
 import os
 
-# --- .env ---
+# =========================
+# .env (carrega logo após BASE_DIR)
+# =========================
 try:
     from dotenv import load_dotenv
 except ImportError:
     load_dotenv = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 if load_dotenv:
     load_dotenv(BASE_DIR / ".env")
 
 
+# =========================
+# Utils
+# =========================
 def get_list(env_var: str, default=None):
+    """Lê uma env e retorna lista separada por vírgula (com trim)."""
     val = os.getenv(env_var)
     if val:
         return [item.strip() for item in val.split(",") if item.strip()]
@@ -35,7 +42,7 @@ DEBUG = os.getenv("DEBUG", "1") == "1"
 ALLOWED_HOSTS = get_list("ALLOWED_HOSTS", [])
 CSRF_TRUSTED_ORIGINS = get_list("CSRF_TRUSTED_ORIGINS", [])
 
-# Suporte Render (preenche ALLOWED_HOSTS/CSRF automaticamente)
+# Suporte Render: preenche ALLOWED_HOSTS/CSRF automaticamente se a plataforma setar
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 if RENDER_EXTERNAL_HOSTNAME:
     if RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
@@ -184,10 +191,17 @@ STATICFILES_DIRS = [STATIC_DIR] if STATIC_DIR.exists() else []
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# WhiteNoise (dev ajuda / prod eficiente)
+# Finders padrão (necessário para localizar os assets do Django Admin)
+STATICFILES_FINDERS = [
+    "django.contrib.staticfiles.finders.FileSystemFinder",
+    "django.contrib.staticfiles.finders.AppDirectoriesFinder",
+]
+
+# WhiteNoise
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_USE_FINDERS = DEBUG
-# WHITENOISE_KEEP_ONLY_HASHED_FILES = True  # opcional em prod
+# Ajuste temporário do Manifest: defina WHITENOISE_STRICT=1 no Render quando tudo estiver estável
+WHITENOISE_MANIFEST_STRICT = os.getenv("WHITENOISE_STRICT", "0") == "1"
 
 
 # =========================
@@ -198,7 +212,7 @@ if USE_CLOUDINARY:
         "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
-    # Aliases legados para libs que ainda leem esses names:
+    # Aliases legados (algumas libs ainda leem estes nomes)
     DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
     STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 else:
@@ -227,7 +241,7 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@example.com")
 
 
 # =========================
-# Segurança prod
+# Segurança (produção)
 # =========================
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
@@ -239,12 +253,16 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))  # 1 ano
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+    # SameSite padrão
     SESSION_COOKIE_SAMESITE = "Lax"
     CSRF_COOKIE_SAMESITE = "Lax"
+    # Cabeçalhos extras recomendados
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
 
 
 # =========================
-# Logging básico p/ ver nos logs do Render
+# Logging básico (para ver no Render)
 # =========================
 LOGGING = {
     "version": 1,
@@ -254,6 +272,8 @@ LOGGING = {
     "loggers": {
         "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        # Descomente para ver queries SQL (cuidado em produção)
+        # "django.db.backends": {"handlers": ["console"], "level": "DEBUG"},
     },
 }
 
@@ -262,11 +282,3 @@ LOGGING = {
 # Campo id padrão
 # =========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-STATICFILES_FINDERS = [
-    "django.contrib.staticfiles.finders.FileSystemFinder",
-    "django.contrib.staticfiles.finders.AppDirectoriesFinder",
-]
-
-# WhiteNoise: não falhar em referências ausentes no Manifest (hotfix)
-WHITENOISE_MANIFEST_STRICT = False
