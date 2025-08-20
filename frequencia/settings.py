@@ -1,6 +1,6 @@
 """
 Django settings for frequencia project.
-Gerado pelo Django 5.2.x — app 'controle' + Cloudinary opcional + WhiteNoise.
+Gerado pelo Django 5.2.x — app 'controle' + Cloudinary opcional + WhiteNoise (ultra-safe).
 """
 from pathlib import Path
 import os
@@ -200,31 +200,27 @@ STATICFILES_FINDERS = [
 # WhiteNoise
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_USE_FINDERS = DEBUG
-# Ajuste temporário do Manifest: defina WHITENOISE_STRICT=1 no Render quando tudo estiver estável
+# (Quando voltar ao Manifest) defina WHITENOISE_STRICT=1 no Render
 WHITENOISE_MANIFEST_STRICT = os.getenv("WHITENOISE_STRICT", "0") == "1"
 
 
 # =========================
-# STORAGES (SAFE MODE: estáticos sem Manifest) + aliases legados
+# STORAGES (ULTRA-SAFE: sem Manifest e sem compressão)
 # =========================
 if USE_CLOUDINARY:
     STORAGES = {
         "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
-        # SAFE: sem Manifest para evitar MissingFileError no collectstatic
-        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     }
-    # Aliases legados (algumas libs ainda leem estes nomes)
     DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+    STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 else:
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-        # SAFE: sem Manifest para evitar MissingFileError no collectstatic
-        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     }
-    # Aliases legados (evitam AttributeError em libs antigas)
     DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+    STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
 
 
 # =========================
@@ -274,8 +270,7 @@ LOGGING = {
     "loggers": {
         "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
-        # Descomente para ver queries SQL (cuidado em produção)
-        # "django.db.backends": {"handlers": ["console"], "level": "DEBUG"},
+        # "django.db.backends": {"handlers": ["console"], "level": "DEBUG"},  # opcional
     },
 }
 
@@ -284,18 +279,3 @@ LOGGING = {
 # Campo id padrão
 # =========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# === FORÇA SAFE MODE PARA ESTÁTICOS NO RENDER ===
-# Garante que NADA volte para Manifest durante o collectstatic.
-# Deixe aqui no final do arquivo.
-from django.conf import settings as _s
-
-_s.STORAGES["staticfiles"] = {
-    "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"
-}
-_s.STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
-
-# === ULTRA-SAFE: sem Manifest e sem compressão do WhiteNoise ===
-from django.conf import settings as _s
-_s.STORAGES["staticfiles"] = {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}
-_s.STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
