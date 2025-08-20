@@ -262,3 +262,11 @@ LOGGING = {
 # Campo id padrão
 # =========================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+STATICFILES_FINDERS = [
+    "django.contrib.staticfiles.finders.FileSystemFinder",
+    "django.contrib.staticfiles.finders.AppDirectoriesFinder",
+]
+
+# WhiteNoise: não falhar em referências ausentes no Manifest (hotfix)
+WHITENOISE_MANIFEST_STRICT = False
