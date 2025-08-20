@@ -1,0 +1,162 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Folha de Frequência • Lançar Recesso</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18); --g1:#0b1020; --g2:#111a3a; --base-font:14px; }
+    html{ font-size: var(--base-font); } body{ background:#f6f8fb; color:var(--ink); }
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); } .navbar-brand{ font-size:1rem; } .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+    .welcome{ background:linear-gradient(90deg,#111827,#1f2937); color:#fff; border-radius:.75rem; padding:1rem 1.25rem; box-shadow:0 10px 24px rgba(17,24,39,.12); }
+    .welcome .muted{ opacity:.85; font-size:.9rem; }
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .text-muted-2{ color:var(--muted); }
+    .form-label{ font-weight:600; }
+    .btn-icon i{ margin-right:.5rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+
+      <!-- 👇 NOVO: botão de acesso à lista de recessos -->
+      <a class="btn btn-sm btn-outline-warning" href="{% url 'controle:recessos_list' %}">
+        <i class="fa-solid fa-list me-1"></i> Recessos
+      </a>
+
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}"><i class="fa-solid fa-right-from-bracket me-1"></i> Sair</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+  <div class="welcome mb-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+      <div>
+        <div class="h6 m-0">Lançar Recesso</div>
+        <div class="muted">Selecione o setor, os funcionários e o período.</div>
+      </div>
+      <div class="text-nowrap">
+        <a class="btn btn-outline-light btn-sm" href="{% url 'controle:listar_folhas' %}">
+          <i class="fa-regular fa-file-lines me-1"></i> Ver minhas folhas
+        </a>
+      </div>
+    </div>
+  </div>
+
+  {% if messages %}
+    <div class="mb-3">
+      {% for m in messages %}
+        <div class="alert alert-{% if m.tags %}{{ m.tags }}{% else %}success{% endif %} mb-2" role="alert">
+          {{ m }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="card card-clean p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 m-0">Recesso por Funcionário</h2>
+      <div class="d-none d-sm-block">
+        <a class="btn btn-outline-secondary btn-sm" href="{% url 'controle:painel_controle' %}">
+          <i class="fa-solid fa-arrow-left me-1"></i> Voltar ao Painel
+        </a>
+      </div>
+    </div>
+
+    <form method="post" class="mt-2">
+      {% csrf_token %}
+      <div class="mb-3">
+        <label for="id_setor" class="form-label">Setor</label>
+        {{ form.setor }}
+      </div>
+
+      <div class="mb-3">
+        <label for="id_funcionarios" class="form-label">Funcionários</label>
+        {{ form.funcionarios }}
+        <div class="text-muted-2 mt-1">Dica: segure <kbd>Ctrl</kbd>/<kbd>Shift</kbd> para múltiplos.</div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <label for="id_data_inicio" class="form-label">Data início</label>
+          {{ form.data_inicio }}
+        </div>
+        <div class="col-12 col-md-6">
+          <label for="id_data_fim" class="form-label">Data fim</label>
+          {{ form.data_fim }}
+        </div>
+      </div>
+
+      <div class="mt-3 mb-2">
+        <label for="id_motivo" class="form-label">Motivo (opcional)</label>
+        {{ form.motivo }}
+      </div>
+
+      <div class="d-flex flex-wrap gap-2 mt-2">
+        <button class="btn btn-primary btn-icon" type="submit">
+          <i class="fa-solid fa-floppy-disk"></i> Salvar recesso
+        </button>
+        <a class="btn btn-outline-secondary btn-icon" href="{% url 'controle:painel_controle' %}">
+          <i class="fa-solid fa-arrow-left"></i> Voltar ao Painel
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-primary" href="{% url 'controle:recesso_bulk_create' %}">
+      <i class="fa-solid fa-umbrella-beach me-1"></i> Lançar novo recesso
+    </a>
+  </div>
+</main>
+
+<div class="text-center py-2" style="background:linear-gradient(90deg,#2a4d69,#3b82f6); color:#fff; font-size:.8rem;">
+  Desenvolvido por Alexandre Martins Vieira © 2025
+</div>
+
+<script>
+  const setorSelect = document.getElementById('id_setor');
+  const funcSelect  = document.getElementById('id_funcionarios');
+
+  async function carregarFuncionarios(setorId){
+    if(!funcSelect) return;
+    funcSelect.innerHTML = '';
+    if(!setorId){ return; }
+    const url = "{% url 'controle:api_funcionarios_por_setor' %}?setor=" + encodeURIComponent(setorId);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    data.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = f.nome;
+      funcSelect.appendChild(opt);
+    });
+  }
+
+  if(setorSelect){
+    setorSelect.addEventListener('change', (e) => carregarFuncionarios(e.target.value));
+  }
+
+  (function init(){
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('setor');
+    if(sid){ carregarFuncionarios(sid); }
+  })();
+</script>
+
+</body>
+</html>

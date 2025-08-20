@@ -1,0 +1,148 @@
+{% load controle_filters %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Livro de Ponto</title>
+    <style>
+        body {
+            font-family: Tahoma, sans-serif;
+            margin: 80px 60px;
+            line-height: 1.8;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .logo {
+            max-width: 180px;
+            height: auto;
+            display: block;
+            margin: 0 auto 20px auto;
+        }
+
+        .titulo {
+            font-size: 26px;
+            font-weight: bold;
+            margin-top: 40px;
+        }
+
+        .subtitulo {
+            font-size: 60px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+
+        .texto {
+            font-size: 16px;
+            text-align: justify;
+            margin-top: 40px;
+        }
+
+        .assinatura {
+            margin-top: 80px;
+            text-align: center;
+        }
+
+        .linha-assinatura {
+            border-top: 1px solid #000;
+            width: 250px;
+            margin: 0 auto;
+        }
+
+        .page-break {
+            page-break-after: always;
+        }
+
+        @media print {
+            .no-print {
+                display: none;
+            }
+        }
+
+        .btn-print {
+            background: #003366;
+            color: white;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            margin-top: 20px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-print:hover {
+            background: #002244;
+        }
+    </style>
+</head>
+<body>
+
+<!-- CAPA -->
+<div class="center page-break">
+    {% if escola.logo %}
+    <img src="{{ escola.logo.url }}" alt="Logo da escola" class="logo">
+    {% endif %}
+    <h2>{{ escola.nome_escola }}</h2>
+    <p>{{ escola.endereco }}, {{ escola.numero }} - {{ cidade }}/{{ uf }}</p>
+    <p>{{ escola.email }}</p>
+
+    <div class="titulo">LIVRO DE PONTO {{ setor }}</div>
+    <div class="subtitulo">{{ mes|mes_extenso }} {{ ano }}</div>
+</div>
+
+<!-- TERMO DE ABERTURA -->
+<div class="page-break">
+    <h2 class="center">TERMO DE ABERTURA</h2>
+
+    <div class="texto">
+        Contém o presente livro contém ______ folhas e destina-se ao registro dos pontos diários de serviços prestados à <strong>{{ escola.nome_escola }}</strong> no mês de <strong>{{ mes|mes_extenso|lower }}</strong> de {{ ano }}, no setor <strong>{{ setor }}</strong>.
+
+        <br><br>
+        Este livro deve permanecer no estabelecimento de ensino, à disposição dos funcionários durante o período letivo.
+    </div>
+
+    <p class="center" style="margin-top: 60px;">
+        {{ cidade }} - {{ uf }}, {{ data_abertura }}
+    </p>    
+
+    <div class="assinatura">
+        <div class="linha-assinatura"></div>
+        <p>Diretor(a)</p>
+    </div>
+</div>
+
+<!-- TERMO DE ENCERRAMENTO -->
+<div>
+    <h2 class="center">TERMO DE ENCERRAMENTO</h2>
+
+    <div class="texto">
+        Encerra-se o presente livro com ______ folhas, referente ao mês de <strong>{{ mes|mes_extenso|lower }}</strong> de {{ ano }}, utilizado para o controle de ponto dos servidores vinculados ao setor <strong>{{ setor }}</strong> da <strong>{{ escola.nome_escola }}</strong>.
+
+        <br><br>
+        Nada mais havendo a declarar, firmamos o presente termo.
+    </div>
+
+    <p class="center" style="margin-top: 60px;">
+        {{ cidade }} - {{ uf }}, {{ data_encerramento }}
+    </p>
+
+    <div class="assinatura">
+        <div class="linha-assinatura"></div>
+        <p>Diretor(a)</p>
+    </div>
+</div>
+
+<!-- Botão imprimir -->
+<div class="center no-print">
+    <button class="btn-print" onclick="window.print()">🖨️ Imprimir Tudo</button>
+    <a href="{% url 'controle:painel_alunos' %}" class="btn-print">Início</a>
+    <p style="font-size: 12px; color: #333; margin-top: 8px;">
+        <em>🔧 Dica: Desmarque "Cabeçalhos e rodapés" na impressão para ocultar o link da página.</em>
+    </p>
+</div>
+
+
+</body>
+</html>

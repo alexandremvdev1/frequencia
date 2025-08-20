@@ -1,0 +1,196 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Gestão de Acessos • Revogar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Bootstrap + FontAwesome -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <style>
+    :root{
+      --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18);
+      --g1:#0b1020; --g2:#111a3a; --base-font:14px;
+    }
+    html{ font-size: var(--base-font); }
+    body{ background:#f6f8fb; color:var(--ink); }
+
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
+    .navbar-brand{ font-size:1rem; }
+    .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+
+    .welcome{
+      background:linear-gradient(90deg,#111827,#1f2937);
+      color:#fff; border-radius:.75rem; padding:1rem 1.25rem;
+      box-shadow:0 10px 24px rgba(17,24,39,.12);
+    }
+    .welcome .muted{ opacity:.85; font-size:.9rem; }
+
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .text-muted-2{ color:var(--muted); }
+    .banner-desenvolvido{ background:linear-gradient(90deg,#2a4d69,#3b82f6); color:#fff; font-size:.8rem; }
+    .table-sm th, .table-sm td{ vertical-align: middle; }
+    .pill{ font-size:.75rem; padding:.15rem .45rem; border-radius:999px; border:1px solid #e5e7eb; background:#fff; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <span class="navbar-brand fw-bold">
+      <i class="fa-solid fa-user-shield me-1"></i> Gestão de Acessos
+    </span>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:scope_manager' %}" title="Voltar">
+        ← Voltar
+      </a>
+      <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}">
+        <i class="fa-solid fa-right-from-bracket me-1"></i> Sair
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+
+  <!-- Mensagens -->
+  {% if messages %}
+    <div class="mb-3">
+      {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <!-- Cabeçalho -->
+  <div class="welcome mb-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+      <div>
+        <div class="h6 m-0">Revogar acesso</div>
+        <div class="muted">Busque por usuário ou unidade e remova o escopo desejado.</div>
+      </div>
+      <div class="text-nowrap">
+        <span class="badge text-bg-light">Escopos listados: {{ escopos|length }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filtro -->
+  <div class="card card-clean p-3 mb-3">
+    <form class="row g-2 align-items-center" method="get">
+      <div class="col-12 col-md-8">
+        <input type="text" class="form-control" name="q" placeholder="Buscar por usuário, prefeitura, secretaria, escola, setor…" value="{{ q }}">
+      </div>
+      <div class="col-12 col-md-4 d-grid d-md-flex gap-2">
+        <button class="btn btn-primary" type="submit">
+          <i class="fa-solid fa-magnifying-glass me-1"></i> Buscar
+        </button>
+        <a href="{% url 'controle:acessos_revogar' %}" class="btn btn-outline-secondary">
+          Limpar
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tabela de escopos -->
+  <div class="card card-clean p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 m-0"><i class="fa-solid fa-list-check me-1"></i> Escopos existentes</h2>
+    </div>
+
+    {% if escopos %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Usuário</th>
+              <th>Escopo</th>
+              <th>Unidade</th>
+              <th>Nível</th>
+              <th class="text-end">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in escopos %}
+              <tr>
+                <td>
+                  <div class="fw-semibold">{{ s.user.get_full_name|default:s.user.username }}</div>
+                  <div class="text-muted-2 small">{{ s.user.username }}</div>
+                </td>
+
+                <td>
+                  {% if s.prefeitura %}<span class="pill">Prefeitura</span>
+                  {% elif s.secretaria %}<span class="pill">Secretaria</span>
+                  {% elif s.escola %}<span class="pill">Escola</span>
+                  {% elif s.departamento %}<span class="pill">Departamento</span>
+                  {% elif s.setor %}<span class="pill">Setor</span>
+                  {% else %}<span class="text-muted-2">—</span>{% endif %}
+                </td>
+
+                <td>
+                  {% if s.prefeitura %}
+                    {{ s.prefeitura.nome }}
+                  {% elif s.secretaria %}
+                    {{ s.secretaria.prefeitura.nome }} — {{ s.secretaria.nome }}
+                  {% elif s.escola %}
+                    {{ s.escola.secretaria.prefeitura.nome }} — {{ s.escola.secretaria.nome }} — {{ s.escola.nome_escola }}
+                  {% elif s.departamento %}
+                    {% if s.departamento.prefeitura %}{{ s.departamento.prefeitura.nome }} — {% endif %}
+                    {% if s.departamento.secretaria %}{{ s.departamento.secretaria.nome }} — {% endif %}
+                    {% if s.departamento.escola %}{{ s.departamento.escola.nome_escola }} — {% endif %}
+                    {{ s.departamento.nome }}
+                  {% elif s.setor %}
+                    {% if s.setor.departamento %}
+                      {% if s.setor.departamento.prefeitura %}{{ s.setor.departamento.prefeitura.nome }} — {% endif %}
+                      {% if s.setor.departamento.secretaria %}{{ s.setor.departamento.secretaria.nome }} — {% endif %}
+                      {% if s.setor.departamento.escola %}{{ s.setor.departamento.escola.nome_escola }} — {% endif %}
+                    {% elif s.setor.secretaria %}
+                      {{ s.setor.secretaria.prefeitura.nome }} — {{ s.setor.secretaria.nome }} — 
+                    {% endif %}
+                    {{ s.setor.nome }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                <td>
+                  {{ s.get_nivel_display|default:s.nivel }}
+                </td>
+
+                <td class="text-end">
+                  <form method="post" class="d-inline-block"
+                        onsubmit="return confirm('Revogar este acesso?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="scope_id" value="{{ s.id }}">
+                    <button class="btn btn-sm btn-danger">
+                      <i class="fa-solid fa-trash-can me-1"></i> Revogar
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-center text-muted-2 py-3">Nenhum escopo encontrado.</div>
+    {% endif %}
+  </div>
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-secondary" href="{% url 'controle:scope_manager' %}">
+      <i class="fa-solid fa-arrow-left me-1"></i> Voltar
+    </a>
+  </div>
+</main>
+
+<div class="banner-desenvolvido text-center py-2">
+  Desenvolvido por Alexandre Martins Vieira © 2025
+</div>
+</body>
+</html>

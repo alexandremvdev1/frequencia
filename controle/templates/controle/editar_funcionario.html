@@ -1,0 +1,398 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Funcionários • Editar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Bootstrap + FontAwesome -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --g1:#0b1020; --g2:#111a3a; --base-font:14px; }
+    html{ font-size: var(--base-font); }
+    body{ background:#f6f8fb; color:var(--ink); }
+
+    /* Navbar gradiente */
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
+    .navbar-brand{ font-size:1rem; }
+    .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+
+    /* Card */
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .text-muted-2{ color:var(--muted); }
+    .hr-soft{ border:0; border-top:1px solid #e5e7eb; margin:1rem 0; }
+
+    .erro{ color:#e11d48; font-size:.85rem; margin-top:.25rem; }
+    .thumb-foto{ max-height:120px; }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">← Funcionários</a>
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+      <a class="btn btn-sm btn-light" href="{% url 'controle:cadastrar_funcionario' %}">+ Funcionário</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+
+  <div class="card card-clean p-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h1 class="h5 m-0"><i class="fa-solid fa-user-pen me-2"></i>Editar Funcionário: {{ funcionario.nome }}</h1>
+    </div>
+
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger py-2">
+        {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+
+      <!-- Identificação -->
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label for="{{ form.nome.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-user me-1"></i>Nome
+          </label>
+          {{ form.nome }}
+          {% if form.nome.errors %}<div class="erro">{{ form.nome.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.matricula.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-id-card me-1"></i>Matrícula
+          </label>
+          {{ form.matricula }}
+          {% if form.matricula.errors %}<div class="erro">{{ form.matricula.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Cargo/Função -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.funcao.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-briefcase me-1"></i>Função
+          </label>
+          {{ form.funcao }}
+          {% if form.funcao.errors %}<div class="erro">{{ form.funcao.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.cargo.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-tag me-1"></i>Cargo
+          </label>
+          {{ form.cargo }}
+          {% if form.cargo.errors %}<div class="erro">{{ form.cargo.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Setor, Turno e Turma -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label for="{{ form.setor.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-building me-1"></i>Setor
+          </label>
+          {{ form.setor }}
+          {% if form.setor.errors %}<div class="erro">{{ form.setor.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label for="{{ form.turno.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-sun me-1"></i>Turno
+          </label>
+          {{ form.turno }}
+          {% if form.turno.errors %}<div class="erro">{{ form.turno.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label for="{{ form.turma.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-graduation-cap me-1"></i>Turma
+          </label>
+          {{ form.turma }}
+          {% if form.turma.errors %}<div class="erro">{{ form.turma.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Datas -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.data_admissao.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-calendar-plus me-1"></i>Data de Admissão
+          </label>
+          {{ form.data_admissao }}
+          <div class="form-text">Formato: dd/mm/aaaa</div>
+          {% if form.data_admissao.errors %}<div class="erro">{{ form.data_admissao.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.data_nascimento.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-cake-candles me-1"></i>Data de Nascimento
+          </label>
+          {{ form.data_nascimento }}
+          <div class="form-text">Formato: dd/mm/aaaa</div>
+          {% if form.data_nascimento.errors %}<div class="erro">{{ form.data_nascimento.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Documentos -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.cpf.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-id-card-clip me-1"></i>CPF
+          </label>
+          {{ form.cpf }}
+          {% if form.cpf.errors %}<div class="erro">{{ form.cpf.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.rg.id_for_label }}" class="form-label">
+            <i class="fa-regular fa-id-card me-1"></i>RG
+          </label>
+          {{ form.rg }}
+          {% if form.rg.errors %}<div class="erro">{{ form.rg.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.pis.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-file-lines me-1"></i>PIS
+          </label>
+          {{ form.pis }}
+          {% if form.pis.errors %}<div class="erro">{{ form.pis.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.titulo_eleitor.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-check-to-slot me-1"></i>Título de Eleitor
+          </label>
+          {{ form.titulo_eleitor }}
+          {% if form.titulo_eleitor.errors %}<div class="erro">{{ form.titulo_eleitor.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.ctps_numero.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-address-card me-1"></i>CTPS - Número
+          </label>
+          {{ form.ctps_numero }}
+          {% if form.ctps_numero.errors %}<div class="erro">{{ form.ctps_numero.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.ctps_serie.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-list-ol me-1"></i>CTPS - Série
+          </label>
+          {{ form.ctps_serie }}
+          {% if form.ctps_serie.errors %}<div class="erro">{{ form.ctps_serie.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Contato -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.telefone.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-phone me-1"></i>Telefone
+          </label>
+          {{ form.telefone }}
+          {% if form.telefone.errors %}<div class="erro">{{ form.telefone.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="{{ form.email.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-envelope me-1"></i>E-mail
+          </label>
+          {{ form.email }}
+          {% if form.email.errors %}<div class="erro">{{ form.email.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Endereço -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-8">
+          <label for="{{ form.endereco.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-location-dot me-1"></i>Endereço
+          </label>
+          {{ form.endereco }}
+          {% if form.endereco.errors %}<div class="erro">{{ form.endereco.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label for="{{ form.numero.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-hashtag me-1"></i>Número
+          </label>
+          {{ form.numero }}
+          {% if form.numero.errors %}<div class="erro">{{ form.numero.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-5">
+          <label for="{{ form.bairro.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-city me-1"></i>Bairro
+          </label>
+          {{ form.bairro }}
+          {% if form.bairro.errors %}<div class="erro">{{ form.bairro.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-5">
+          <label for="{{ form.cidade.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-map me-1"></i>Cidade
+          </label>
+          {{ form.cidade }}
+          {% if form.cidade.errors %}<div class="erro">{{ form.cidade.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-2">
+          <label for="{{ form.uf.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-flag me-1"></i>UF
+          </label>
+          {{ form.uf }}
+          {% if form.uf.errors %}<div class="erro">{{ form.uf.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-4">
+          <label for="{{ form.cep.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-mailbox me-1"></i>CEP
+          </label>
+          {{ form.cep }}
+          {% if form.cep.errors %}<div class="erro">{{ form.cep.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label for="{{ form.estado_civil.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-heart me-1"></i>Estado Civil
+          </label>
+          {{ form.estado_civil }}
+          {% if form.estado_civil.errors %}<div class="erro">{{ form.estado_civil.errors.0 }}</div>{% endif %}
+        </div>
+        <div class="col-md-4">
+          <label for="{{ form.escolaridade.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-book me-1"></i>Escolaridade
+          </label>
+          {{ form.escolaridade }}
+          {% if form.escolaridade.errors %}<div class="erro">{{ form.escolaridade.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Planejamento -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <div class="form-check mt-2">
+            {{ form.tem_planejamento }}
+            <label for="{{ form.tem_planejamento.id_for_label }}" class="form-check-label">
+              <i class="fa-solid fa-calendar-check me-1"></i>Possui Planejamento?
+            </label>
+          </div>
+        </div>
+        <div class="col-md-6" id="campo_horario_planejamento">
+          <label for="{{ form.horario_planejamento.id_for_label }}" class="form-label">
+            <i class="fa-regular fa-clock me-1"></i>Horário de Planejamento
+          </label>
+          {{ form.horario_planejamento }}
+          {% if form.horario_planejamento.errors %}<div class="erro">{{ form.horario_planejamento.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Sábado letivo -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <div class="form-check">
+            {{ form.sabado_letivo }}
+            <label for="{{ form.sabado_letivo.id_for_label }}" class="form-check-label">
+              <i class="fa-regular fa-calendar-days me-1"></i>Atua em sábado letivo?
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Foto -->
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label for="{{ form.foto.id_for_label }}" class="form-label">
+            <i class="fa-solid fa-camera me-1"></i>Foto (3x4)
+          </label>
+          {% if funcionario.foto %}
+            <div class="mb-2">
+              <img src="{{ funcionario.foto.url }}" alt="Foto atual" class="img-thumbnail thumb-foto">
+            </div>
+          {% endif %}
+          {{ form.foto }}
+          {% if form.foto.errors %}<div class="erro">{{ form.foto.errors.0 }}</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="d-grid d-md-flex gap-2 mt-4">
+        <button type="submit" class="btn btn-primary">
+          <i class="fa-solid fa-floppy-disk me-2"></i>Salvar Alterações
+        </button>
+        <a href="{% url 'controle:listar_funcionarios' %}" class="btn btn-outline-secondary">
+          <i class="fa-solid fa-arrow-left me-2"></i>Voltar para Listagem
+        </a>
+      </div>
+    </form>
+  </div>
+
+</main>
+
+<!-- Scripts -->
+<script>
+  // Aplica classes Bootstrap nos widgets padrão do Django (sem usar filtros do template)
+  (function applyBootstrapClasses(){
+    const map = { 'INPUT':'form-control', 'SELECT':'form-select', 'TEXTAREA':'form-control' };
+    document.querySelectorAll('input, select, textarea').forEach(el=>{
+      const type = (el.getAttribute('type')||'').toLowerCase();
+      if(type === 'checkbox'){ el.classList.add('form-check-input'); }
+      else if(type === 'file'){ el.classList.add('form-control'); }
+      else{ el.classList.add(map[el.tagName] || 'form-control'); }
+    });
+    document.querySelectorAll('label.form-label, .form-check-label').forEach(l => l.classList.add('form-label'));
+  })();
+
+  // Máscara dd/mm/aaaa para campos de data quando não forem <input type="date">
+  function aplicarMascaraData(input){
+    if(!input) return;
+    if((input.getAttribute('type')||'').toLowerCase() === 'date') return;
+    input.setAttribute('placeholder','00/00/0000');
+    input.addEventListener('input', function(e){
+      let v = e.target.value.replace(/\D/g,'').slice(0,8);
+      if(v.length >= 5) e.target.value = v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+      else if(v.length >= 3) e.target.value = v.slice(0,2)+'/'+v.slice(2);
+      else e.target.value = v;
+    });
+  }
+
+  // Mostra/esconde campo de horário de planejamento
+  function togglePlanejamento(){
+    const chk = document.getElementById('{{ form.tem_planejamento.id_for_label }}') || document.getElementById('id_tem_planejamento');
+    const box = document.getElementById('campo_horario_planejamento');
+    if(!chk || !box) return;
+    box.style.display = chk.checked ? '' : 'none';
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    // Aplica máscara nas datas (ajuste os IDs conforme seus widgets)
+    aplicarMascaraData(document.getElementById('{{ form.data_admissao.id_for_label }}') || document.getElementById('id_data_admissao'));
+    aplicarMascaraData(document.getElementById('{{ form.data_nascimento.id_for_label }}') || document.getElementById('id_data_nascimento'));
+
+    // Marca visualmente campos com erro
+    document.querySelectorAll('.erro').forEach(err=>{
+      const prev = err.previousElementSibling;
+      if(prev && prev.classList) prev.classList.add('is-invalid');
+    });
+
+    // Planejamento
+    togglePlanejamento();
+    const chk = document.getElementById('{{ form.tem_planejamento.id_for_label }}') || document.getElementById('id_tem_planejamento');
+    if(chk) chk.addEventListener('change', togglePlanejamento);
+  });
+</script>
+
+</body>
+</html>

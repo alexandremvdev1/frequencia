@@ -1,0 +1,192 @@
+{% load static %}
+{% load controle_filters %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Folha de Frequência • Painel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18); --g1:#0b1020; --g2:#111a3a; --base-font:14px; }
+    html{ font-size: var(--base-font); } body{ background:#f6f8fb; color:var(--ink); }
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); } .navbar-brand{ font-size:1rem; } .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+    .welcome{ background:linear-gradient(90deg,#111827,#1f2937); color:#fff; border-radius:.75rem; padding:1rem 1.25rem; box-shadow:0 10px 24px rgba(17,24,39,.12); }
+    .welcome .muted{ opacity:.85; font-size:.9rem; }
+    .kpi{ background:#fff; border:1px solid #e5e7eb; border-radius:.8rem; padding:.75rem 1rem; transition:transform .08s ease, box-shadow .08s ease; }
+    .kpi:hover{ transform:translateY(-1px); box-shadow:0 8px 18px rgba(17,24,39,.08); }
+    .kpi .small{ color:var(--muted); } .kpi .fs-4{ font-size:1.15rem!important; } .kpi .fw-bold{ font-weight:700!important; }
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; } .text-muted-2{ color:var(--muted); }
+    .importar-container{ position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:.6rem; z-index:1040; }
+    .importar-botao{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:#111827; color:#fff; text-decoration:none; box-shadow:0 10px 24px rgba(17,24,39,.18); transition:transform .08s ease, opacity .2s ease; }
+    .importar-botao:hover{ transform:translateY(-2px); opacity:.92; }
+    .banner-desenvolvido{ background:linear-gradient(90deg,#2a4d69,#3b82f6); color:#fff; font-size:.8rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}"><i class="fa-solid fa-right-from-bracket me-1"></i> Sair</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+  <div class="welcome mb-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+      <div>
+        <div class="h6 m-0">Bem-vindo(a), <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>!</div>
+        <div class="muted">Você está no painel do sistema de Folha de Frequência.</div>
+      </div>
+      <div class="text-nowrap">
+        <a class="btn btn-outline-light btn-sm" href="{% url 'controle:listar_folhas' %}"><i class="fa-regular fa-file-lines me-1"></i> Ver minhas folhas</a>
+      </div>
+    </div>
+  </div>
+
+  {% escopos_do_usuario as meus_escopos %}
+  <div class="alert alert-info py-2 px-3 mb-3 small">
+    <strong>Seu escopo:</strong>
+    {% if request.user.is_superuser or request.user.is_staff %}
+      Todas as secretarias (admin).
+    {% elif meus_escopos %}
+      {{ meus_escopos|join:", " }}
+    {% else %}
+      Nenhuma secretaria atribuída ainda.
+    {% endif %}
+  </div>
+
+  <!-- KPIs -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3"><a class="text-decoration-none" href="{% url 'controle:listar_funcionarios' %}"><div class="kpi"><div class="small">Funcionários</div><div class="fs-4 fw-bold">{{ funcionarios_count|default:0 }}</div></div></a></div>
+    <div class="col-6 col-md-3"><a class="text-decoration-none" href="{% url 'controle:cadastrar_horario' %}"><div class="kpi"><div class="small">Horários</div><div class="fs-4 fw-bold">{{ horarios_count|default:0 }}</div></div></a></div>
+    <div class="col-6 col-md-3"><a class="text-decoration-none" href="{% url 'controle:cadastrar_feriado' %}"><div class="kpi"><div class="small">Feriados</div><div class="fs-4 fw-bold">{{ feriados_count|default:0 }}</div></div></a></div>
+    <div class="col-6 col-md-3"><a class="text-decoration-none" href="{% url 'controle:listar_folhas' %}"><div class="kpi"><div class="small">Folhas (30d)</div><div class="fs-4 fw-bold">{{ folhas_30d_q|default:0 }}</div></div></a></div>
+    <div class="col-6 col-md-3"><div class="kpi"><div class="small">Aniversariantes hoje</div><div class="fs-4 fw-bold">{{ aniversariantes_dia|length }}</div></div></div>
+    <div class="col-6 col-md-3"><div class="kpi"><div class="small">Aniversariantes no mês</div><div class="fs-4 fw-bold">{{ aniversariantes_mes|length }}</div></div></div>
+  </div>
+
+  <div class="row g-3">
+    <!-- Ações rápidas -->
+    <div class="col-12 col-xl-4">
+      <div class="card card-clean p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 m-0">Ações rápidas</h2>
+        </div>
+        <div class="d-grid gap-2">
+          {% if request.user.is_superuser %}
+            <a class="btn btn-primary" href="{% url 'controle:selecionar_funcionarios' %}"><i class="fa-solid fa-file-alt me-2"></i> Gerar Frequências</a>
+            <a class="btn btn-outline-primary" href="{% url 'controle:listar_folhas' %}"><i class="fa-solid fa-check-circle me-2"></i> Frequências Geradas</a>
+            <a class="btn btn-outline-warning" href="{% url 'controle:recesso_bulk_create' %}"><i class="fa-solid fa-umbrella-beach me-2"></i> Lançar Recesso</a>
+            <hr class="my-2">
+            <a class="btn btn-success" href="{% url 'controle:cadastrar_funcionario' %}"><i class="fa-solid fa-user-plus me-2"></i> Cadastrar Funcionário</a>
+            <a class="btn btn-outline-secondary" href="{% url 'controle:listar_funcionarios' %}"><i class="fa-solid fa-users me-2"></i> Listar Funcionários</a>
+            <a class="btn btn-info" href="{% url 'controle:cadastrar_horario' %}"><i class="fa-solid fa-clock me-2"></i> Cadastrar Horários</a>
+            <a class="btn btn-secondary" href="{% url 'controle:cadastrar_feriado' %}"><i class="fa-solid fa-calendar-alt me-2"></i> Cadastrar Feriados</a>
+            <a class="btn btn-warning" href="{% url 'controle:gerar_folhas_multimes_funcionario' %}"><i class="fa-solid fa-book me-2"></i> Frequências Individuais</a>
+            <a class="btn btn-outline-dark" href="{% url 'controle:relatorios_funcionarios' %}"><i class="fa-solid fa-chart-line me-2"></i> Relatórios Personalizados</a>
+            <a class="btn btn-outline-primary" href="{% url 'controle:selecionar_capa' %}"><i class="fa-solid fa-book-open me-2"></i> Capa de Livro de Frequência</a>
+
+            <hr class="my-2">
+            <div class="alert alert-warning py-2 px-3 m-0 small">
+              <strong>Gestão de Acessos (superadmin)</strong><br>Conceda ou revogue escopos (Prefeitura, Secretarias, Unidades/Escolas, Setores).
+            </div>
+            <div class="row g-2 mt-2">
+              <div class="col-12 col-sm-6">
+                <a class="btn w-100 btn-outline-warning" href="{% url 'controle:acessos_conceder' %}"><i class="fa-solid fa-user-shield me-2"></i> Conceder Acesso</a>
+              </div>
+              <div class="col-12 col-sm-6">
+                <a class="btn w-100 btn-outline-danger" href="{% url 'controle:acessos_revogar' %}"><i class="fa-solid fa-user-xmark me-2"></i> Revogar Acesso</a>
+              </div>
+            </div>
+          {% else %}
+            <a class="btn btn-primary" href="{% url 'controle:selecionar_funcionarios' %}"><i class="fa-solid fa-file-alt me-2"></i> Gerar Frequências</a>
+            <a class="btn btn-outline-primary" href="{% url 'controle:listar_folhas' %}"><i class="fa-solid fa-check-circle me-2"></i> Frequências Geradas</a>
+            <a class="btn btn-outline-warning" href="{% url 'controle:recesso_bulk_create' %}"><i class="fa-solid fa-umbrella-beach me-2"></i> Lançar Recesso</a>
+            <hr class="my-2">
+            <a class="btn btn-success" href="{% url 'controle:cadastrar_funcionario' %}"><i class="fa-solid fa-user-plus me-2"></i> Cadastrar Funcionário</a>
+            <a class="btn btn-outline-secondary" href="{% url 'controle:listar_funcionarios' %}"><i class="fa-solid fa-users me-2"></i> Listar Funcionários</a>
+            <a class="btn btn-info" href="{% url 'controle:cadastrar_horario' %}"><i class="fa-solid fa-clock me-2"></i> Cadastrar Horários</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Listas de aniversariantes -->
+    <div class="col-12 col-xl-8">
+      <div class="card card-clean p-3 mb-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h6 m-0">🎉 Aniversariantes do mês</h2>
+        </div>
+        <div class="mt-2">
+          {% if aniversariantes_mes %}
+            <ul class="list-group list-group-flush">
+              {% for f in aniversariantes_mes %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  <span>{{ f.nome }}</span>
+                  <span class="badge text-bg-light">{{ f.data_nascimento|date:"d/m" }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="text-center text-muted-2 py-3">Nenhum aniversariante neste mês.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card card-clean p-3">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h6 m-0">🎂 Aniversariantes de hoje</h2>
+        </div>
+        <div class="mt-2">
+          {% if aniversariantes_dia %}
+            <ul class="list-group list-group-flush">
+              {% for f in aniversariantes_dia %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  <span>{{ f.nome }}</span>
+                  <span class="badge text-bg-light">{{ f.data_nascimento|date:"d/m" }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="text-center text-muted-2 py-3">Nenhum aniversariante de hoje.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-secondary" href="{% url 'controle:painel_controle' %}">
+      <i class="fa-solid fa-arrow-left me-1"></i> Voltar ao Painel
+    </a>
+  </div>
+</main>
+
+<div class="banner-desenvolvido text-center py-2">
+  Desenvolvido por Alexandre Martins Vieira © 2025
+</div>
+
+{% if request.user.is_superuser %}
+<div class="importar-container">
+  <a href="{% url 'controle:importar_funcionarios' %}" class="importar-botao" title="Importar Funcionários">
+    <i class="fas fa-users"></i>
+  </a>
+  <a href="{% url 'controle:importar_horarios_trabalho' %}" class="importar-botao" title="Importar Horários">
+    <i class="fas fa-clock"></i>
+  </a>
+</div>
+{% endif %}
+
+</body>
+</html>

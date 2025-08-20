@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Ficha de Registro do Empregado</title>
+    <style>
+        body {
+            font-family: Tahoma, sans-serif;
+            margin: 20px;
+            background: white;
+            color: black;
+        }
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            border: 1px solid #000;
+            padding: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        td, th {
+            border: 1px solid #000;
+            padding: 6px;
+            vertical-align: top;
+        }
+        .foto {
+            width: 100px;
+            height: 130px;
+            border: 1px solid #000;
+            text-align: center;
+        }
+        .botoes {
+            text-align: right;
+            margin-bottom: 20px;
+        }
+        .botoes button {
+            padding: 8px 20px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .assinaturas td {
+            height: 80px;
+            text-align: center;
+            vertical-align: bottom;
+        }
+        .cabecalho {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .cabecalho img {
+            max-height: 100px;
+            margin-bottom: 10px;
+        }
+        .cabecalho h1 {
+            margin: 0;
+            font-size: 20px;
+        }
+        .cabecalho p {
+            margin: 3px 0;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="botoes">
+    <button onclick="window.print()">🖨️ Imprimir Ficha</button>
+</div>
+
+<!-- Cabeçalho institucional -->
+<div class="cabecalho">
+    {% if escola.logo %}
+        <img src="{{ escola.logo.url }}" alt="Logo da Escola">
+    {% endif %}
+    <h1>{{ escola.nome_escola }}</h1>
+    <p>Secretaria: {{ escola.nome_secretaria }}</p>
+    <p>CNPJ: {{ escola.cnpj }}</p>
+    <p>{{ escola.endereco }}, Nº {{ escola.numero }} – {{ escola.bairro }} – {{ escola.cidade }}/{{ escola.uf }}</p>
+    <p>Tel: {{ escola.telefone }} | E-mail: {{ escola.email }}</p>
+</div>
+
+<h2>Ficha de Registro do Empregado</h2>
+
+<table>
+    <tr>
+        <td colspan="3"><strong>Empresa:</strong> {{ escola.nome_escola }}</td>
+        <td><strong>Matrícula:</strong> {{ funcionario.matricula }}</td>
+    </tr>
+    <tr>
+        <td rowspan="5" class="foto">
+            {% if funcionario.foto %}
+                <img src="{{ funcionario.foto.url }}" width="100%" height="130px">
+            {% else %}
+                Foto 3x4
+            {% endif %}
+        </td>
+        <td><strong>Nome:</strong> {{ funcionario.nome }}</td>
+        <td><strong>CPF:</strong> {{ funcionario.cpf }}</td>
+        <td><strong>Data de Nascimento:</strong> {{ funcionario.data_nascimento|date:"d/m/Y" }}</td>
+    </tr>
+    <tr>
+        <td><strong>RG:</strong> {{ funcionario.rg }}</td>
+        <td><strong>PIS:</strong> {{ funcionario.pis }}</td>
+        <td><strong>Título de Eleitor:</strong> {{ funcionario.titulo_eleitor }}</td>
+    </tr>
+    <tr>
+        <td><strong>CTPS Nº:</strong> {{ funcionario.ctps_numero }}</td>
+        <td><strong>Série:</strong> {{ funcionario.ctps_serie }}</td>
+        <td><strong>Função:</strong> {{ funcionario.funcao }}</td>
+    </tr>
+    <tr>
+        <td><strong>Cargo:</strong> {{ funcionario.cargo }}</td>
+        <td><strong>Setor:</strong> {{ funcionario.setor.nome }}</td>
+        <td><strong>Data de Admissão:</strong> {{ funcionario.data_admissao|date:"d/m/Y" }}</td>
+    </tr>
+    <tr>
+        <td colspan="3"><strong>Turno:</strong> {{ funcionario.turno }} | <strong>Turma:</strong> {{ funcionario.turma }}</td>
+    </tr>
+</table>
+
+<table>
+    <tr>
+        <td><strong>Telefone:</strong> {{ funcionario.telefone }}</td>
+        <td><strong>Email:</strong> {{ funcionario.email }}</td>
+        <td><strong>Estado Civil:</strong> {{ funcionario.estado_civil }}</td>
+    </tr>
+    <tr>
+        <td><strong>Escolaridade:</strong> {{ funcionario.escolaridade }}</td>
+        <td colspan="2"><strong>Horário de Planejamento:</strong> {{ funcionario.horario_planejamento }}</td>
+    </tr>
+    <tr>
+        <td colspan="3"><strong>Trabalha aos Sábados Letivos?</strong> 
+            {% if funcionario.sabado_letivo %}Sim{% else %}Não{% endif %}
+        </td>
+    </tr>
+</table>
+
+<table>
+    <tr>
+        <td colspan="2"><strong>Endereço:</strong> {{ funcionario.endereco }}, Nº {{ funcionario.numero }}</td>
+        <td><strong>Bairro:</strong> {{ funcionario.bairro }}</td>
+    </tr>
+    <tr>
+        <td><strong>Cidade:</strong> {{ funcionario.cidade }}</td>
+        <td><strong>UF:</strong> {{ funcionario.uf }}</td>
+        <td><strong>CEP:</strong> {{ funcionario.cep }}</td>
+    </tr>
+</table>
+<table>
+    <tr>
+        <td><strong>Raça:</strong> Branca</td>
+        <td colspan="2"><strong>Anotações Gerais:</strong></td>
+    </tr>
+    <tr>
+        <td colspan="3" style="height: 60px;"></td>
+    </tr>
+</table>
+
+<table class="assinaturas">
+    <tr>
+        <td>__________________________________<br>Assinatura do Empregador</td>
+        <td>__________________________________<br>Assinatura do Empregado</td>
+        <td>__________________________________<br>Data</td>
+    </tr>
+</table>
+
+</body>
+</html>

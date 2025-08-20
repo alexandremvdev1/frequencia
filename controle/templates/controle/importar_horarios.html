@@ -1,0 +1,23 @@
+
+
+{% block content %}
+<div style="max-width: 600px; margin: auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+    <h2>Importar Horários de Trabalho</h2>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div style="padding: 10px; background: {% if message.tags == 'error' %}#ffdddd{% else %}#ddffdd{% endif %}; border-radius: 5px; margin-bottom: 10px;">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="arquivo_horarios"><strong>Arquivo Excel ou CSV:</strong></label><br>
+        <input type="file" name="arquivo_horarios" accept=".xlsx,.xls,.csv" required style="margin-top: 5px;"><br><br>
+        <button type="submit" style="background: #00529B; color: white; border: none; padding: 10px 20px; border-radius: 5px;">Importar</button>
+        <a href="{% url 'home' %}" style="margin-left: 15px;">Voltar</a>
+    </form>
+</div>
+{% endblock %}

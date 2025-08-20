@@ -1,0 +1,260 @@
+{% load static %}
+{% load controle_filters %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Folha de Frequência • Selecionar Funcionários</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --g1:#0b1020; --g2:#111a3a; --base-font:14px; }
+    html{ font-size: var(--base-font); }
+    body{ background:#f6f8fb; color:var(--ink); }
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
+    .navbar-brand{ font-size:1rem; }
+    .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .text-muted-2{ color:var(--muted); }
+    .checkbox-box{ border:1px solid #e5e7eb; border-radius:.75rem; background:#fff; max-height:360px; overflow:auto; padding:.75rem; }
+    .loading-overlay{ position:fixed; inset:0; background:rgba(255,255,255,.85); z-index:1050; display:none; align-items:center; justify-content:center; flex-direction:column; text-align:center; }
+    .loading-overlay img{ width:64px; height:64px; margin-bottom:.75rem; }
+    .welcome{ background:linear-gradient(90deg,#111827,#1f2937); color:#fff; border-radius:.75rem; padding:1rem 1.25rem; box-shadow:0 10px 24px rgba(17,24,39,.12); }
+    .welcome .muted{ opacity:.85; font-size:.9rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:painel_controle' %}">← Voltar ao Painel</a>
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}"><i class="fa-solid fa-right-from-bracket me-1"></i> Sair</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+  <div class="welcome mb-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+      <div>
+        <div class="h6 m-0">
+          Bem-vindo(a), <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>!
+        </div>
+        <div class="muted">Selecione a Secretaria, depois o Departamento e o Setor. O sistema já filtra somente onde você tem permissão de <u>gerência</u> para gerar folhas.</div>
+      </div>
+      <div class="text-nowrap">
+        <a class="btn btn-outline-light btn-sm" href="{% url 'controle:listar_folhas' %}">
+          <i class="fa-regular fa-file-lines me-1"></i> Ver folhas geradas
+        </a>
+      </div>
+    </div>
+  </div>
+
+  {% escopos_do_usuario as meus_escopos %}
+  <div class="alert alert-info py-2 px-3 mb-3 small">
+    <strong>Seu escopo:</strong>
+    {% if request.user.is_superuser or request.user.is_staff %}
+      Administração (todas as unidades).
+    {% elif meus_escopos %}
+      {{ meus_escopos|join:", " }}
+    {% else %}
+      Nenhuma unidade com acesso.
+    {% endif %}
+  </div>
+
+  <!-- FILTROS (apenas onde há GERÊNCIA para gerar) -->
+  <div class="card card-clean p-3 mb-3">
+    <form method="GET" action="{% url 'controle:selecionar_funcionarios' %}" class="row g-2 g-md-3 align-items-end">
+      <!-- SECRETARIA -->
+      <div class="col-12 col-md-4">
+        <label for="secretaria" class="form-label">
+          <i class="fa-solid fa-landmark me-1"></i>Secretaria
+        </label>
+        <select id="secretaria" name="secretaria" class="form-select" onchange="this.form.submit()">
+          <option value="">-- Todas com gerência --</option>
+          {% for sec in secretarias %}
+            {% if sec.id in secretarias_gerenciaveis_ids or request.user|can_manage_secretaria:sec or request.user.is_staff or request.user.is_superuser %}
+              <option value="{{ sec.id }}" {% if secretaria_id|stringformat:"s" == sec.id|stringformat:"s" %}selected{% endif %}>
+                {{ sec.nome }}
+              </option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- DEPARTAMENTO -->
+      <div class="col-12 col-md-4">
+        <label for="departamento" class="form-label">
+          <i class="fa-solid fa-sitemap me-1"></i>Departamento
+        </label>
+        <select id="departamento" name="departamento" class="form-select" onchange="this.form.submit()" {% if not secretaria_id %}disabled{% endif %}>
+          <option value="">-- Todos com gerência --</option>
+          {% for dep in departamentos %}
+            {% if dep.id in departamentos_gerenciaveis_ids or request.user.is_staff or request.user.is_superuser %}
+              <option value="{{ dep.id }}" {% if departamento_id|stringformat:"s" == dep.id|stringformat:"s" %}selected{% endif %}>
+                {{ dep.nome }}
+              </option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        {% if not secretaria_id %}
+          <div class="form-text">Escolha uma secretaria primeiro.</div>
+        {% endif %}
+      </div>
+
+      <!-- SETOR -->
+      <div class="col-12 col-md-4">
+        <label for="setor" class="form-label">
+          <i class="fa-solid fa-building me-1"></i>Setor
+        </label>
+        <select id="setor" name="setor" class="form-select" onchange="this.form.submit()" {% if not departamento_id %}disabled{% endif %} required>
+          <option value="">-- Selecione --</option>
+          {% for s in setores_gerenciaveis %}
+            <option value="{{ s.id }}" {% if setor_id|stringformat:"s" == s.id|stringformat:"s" %}selected{% endif %}>
+              {{ s.nome }}
+            </option>
+          {% endfor %}
+        </select>
+        {% if not departamento_id %}
+          <div class="form-text">Escolha um departamento primeiro.</div>
+        {% endif %}
+      </div>
+
+      <div class="col-12 d-flex gap-2 mt-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="fa-solid fa-magnifying-glass me-1"></i> Filtrar
+        </button>
+        <a class="btn btn-outline-secondary" href="{% url 'controle:selecionar_funcionarios' %}">Limpar filtros</a>
+      </div>
+    </form>
+  </div>
+
+  {# LISTA + GERAÇÃO (somente se setor_atual e user tem GERÊNCIA nele) #}
+  {% if setor_id and funcionarios %}
+    {% if request.user|can_manage_setor:setor_atual or request.user.is_staff or request.user.is_superuser %}
+      <div class="card card-clean p-3">
+        <form method="POST" action="{% url 'controle:gerar_folhas_em_lote' %}" onsubmit="showLoading()">
+          {% csrf_token %}
+
+          <div class="row g-2 g-md-3">
+            <div class="col-12 col-md-4">
+              <label for="mes" class="form-label"><i class="fa-solid fa-calendar-alt me-1"></i>Mês</label>
+              <select id="mes" name="mes" class="form-select" required>
+                <option value="">-- Selecione um mês --</option>
+                {% for numero, nome in meses %}
+                  <option value="{{ numero }}">{{ nome }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-3 col-xl-2">
+              <label for="ano" class="form-label"><i class="fa-solid fa-calendar-week me-1"></i>Ano</label>
+              <input id="ano" type="number" name="ano" class="form-control" value="2025" required>
+            </div>
+            <div class="col-12 col-md-5 col-xl-6 d-flex align-items-end justify-content-md-end">
+              <div class="btn-group" role="group" aria-label="selecionar">
+                <button type="button" class="btn btn-outline-secondary" onclick="selecionarTodos(true)">
+                  <i class="fa-solid fa-check-double me-1"></i>Selecionar todos
+                </button>
+                <button type="button" class="btn btn-outline-secondary" onclick="selecionarTodos(false)">
+                  <i class="fa-solid fa-times-circle me-1"></i>Desmarcar todos
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <input type="hidden" name="secretaria" value="{{ secretaria_id }}">
+          <input type="hidden" name="departamento" value="{{ departamento_id }}">
+          <input type="hidden" name="setor" value="{{ setor_id }}">
+
+          <div class="mt-3">
+            <label class="form-label"><i class="fa-solid fa-user-check me-1"></i>Funcionários</label>
+            <div class="checkbox-box">
+              {% for f in funcionarios %}
+                <div class="form-check">
+                  <input class="form-check-input cb-func" type="checkbox" name="funcionarios" value="{{ f.id }}" id="func-{{ f.id }}">
+                  <label class="form-check-label" for="func-{{ f.id }}">
+                    {{ f.nome }} <span class="text-muted-2">— {{ f.funcao }}</span>
+                  </label>
+                </div>
+              {% endfor %}
+            </div>
+            <div class="small text-muted mt-2">
+              Selecionados: <span id="selCount">0</span> / {{ funcionarios|length }}
+            </div>
+          </div>
+
+          <div class="d-grid d-md-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-primary">
+              <i class="fa-solid fa-file-alt me-2"></i>Gerar Folhas
+            </button>
+            <a href="{% url 'controle:listar_folhas' %}" class="btn btn-outline-primary">
+              <i class="fa-solid fa-check-circle me-2"></i>Ver Frequências Geradas
+            </a>
+          </div>
+        </form>
+      </div>
+    {% else %}
+      <div class="alert alert-warning card-clean" role="alert">
+        <div class="fw-semibold mb-1">
+          <i class="fa-solid fa-lock me-1"></i> Você não tem permissão de <u>gerência</u> neste setor.
+        </div>
+        Você pode <a href="{% url 'controle:listar_folhas' %}">consultar as frequências já geradas</a> dentro do seu escopo.
+      </div>
+    {% endif %}
+  {% else %}
+    {% if secretaria_id or departamento_id or setor_id %}
+      <div class="alert alert-warning card-clean" role="alert">
+        {% if not setor_id %}
+          Selecione um <strong>setor</strong> para listar os funcionários.
+        {% else %}
+          Nenhum funcionário encontrado para o filtro aplicado.
+        {% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-secondary" href="{% url 'controle:painel_controle' %}">
+      <i class="fa-solid fa-arrow-left me-1"></i> Voltar ao Painel de Controle
+    </a>
+  </div>
+</main>
+
+<div id="loadingOverlay" class="loading-overlay">
+  <img src="{% static 'img/loading.gif' %}" alt="Carregando...">
+  <div class="fw-semibold">Gerando frequências, aguarde…</div>
+</div>
+
+<script>
+  function selecionarTodos(checked){
+    document.querySelectorAll('.cb-func').forEach(cb => cb.checked = checked);
+    atualizarContagem();
+  }
+  function showLoading(){
+    const el = document.getElementById('loadingOverlay');
+    if(el) el.style.display = 'flex';
+  }
+  function atualizarContagem(){
+    const count = Array.from(document.querySelectorAll('.cb-func')).filter(cb => cb.checked).length;
+    const el = document.getElementById('selCount');
+    if(el) el.textContent = count;
+  }
+  document.addEventListener('change', (e)=>{
+    if(e.target.classList?.contains('cb-func')) atualizarContagem();
+  });
+</script>
+
+</body>
+</html>

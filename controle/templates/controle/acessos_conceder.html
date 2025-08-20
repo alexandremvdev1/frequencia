@@ -1,0 +1,224 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Gestão de Acessos • Conceder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Bootstrap + FontAwesome -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <style>
+    :root{
+      --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18);
+      --g1:#0b1020; --g2:#111a3a; --base-font:14px;
+    }
+    html{ font-size: var(--base-font); }
+    body{ background:#f6f8fb; color:var(--ink); }
+
+    /* Navbar gradiente */
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
+    .navbar-brand{ font-size:1rem; }
+    .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+
+    /* Welcome banner */
+    .welcome{
+      background:linear-gradient(90deg,#111827,#1f2937);
+      color:#fff; border-radius:.75rem; padding:1rem 1.25rem;
+      box-shadow:0 10px 24px rgba(17,24,39,.12);
+    }
+    .welcome .muted{ opacity:.85; font-size:.9rem; }
+
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .text-muted-2{ color:var(--muted); }
+    .banner-desenvolvido{ background:linear-gradient(90deg,#2a4d69,#3b82f6); color:#fff; font-size:.8rem; }
+    .form-help{ font-size:.8rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <span class="navbar-brand fw-bold">
+      <i class="fa-solid fa-user-shield me-1"></i> Gestão de Acessos
+    </span>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:scope_manager' %}" title="Voltar">
+        ← Voltar
+      </a>
+      <a class="btn btn-sm btn-danger" href="<a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}">">
+        <i class="fa-solid fa-right-from-bracket me-1"></i> Sair
+      </a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+
+  <!-- Mensagens -->
+  {% if messages %}
+    <div class="mb-3">
+      {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} mb-2">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <!-- Cabeçalho -->
+  <div class="welcome mb-3">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+      <div>
+        <div class="h6 m-0">
+          Conceder acesso
+        </div>
+        <div class="muted">
+          Selecione o <strong>usuário</strong>, o <strong>nível</strong> e a <strong>unidade</strong> do escopo.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Formulário -->
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <div class="card card-clean p-3 mb-3">
+      <div class="row g-3">
+        <!-- Usuário -->
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_user">
+            <i class="fa-solid fa-user me-1"></i> Usuário
+          </label>
+          <select class="form-select" id="id_user" name="user" required>
+            <option value="">— selecione —</option>
+            {% for u in usuarios %}
+              <option value="{{ u.pk }}">{{ u.get_full_name|default:u.username }} ({{ u.username }})</option>
+            {% endfor %}
+          </select>
+          <div class="form-help">Quem receberá o acesso.</div>
+        </div>
+
+        <!-- Nível -->
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_nivel">
+            <i class="fa-solid fa-key me-1"></i> Nível de acesso
+          </label>
+          <select class="form-select" id="id_nivel" name="nivel" required>
+            {% for value,label in niveis %}
+              <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-help">Leitura ou Gerência (CRUD).</div>
+        </div>
+      </div>
+
+      <hr class="my-3">
+
+      <!-- Escopo: escolha UMA unidade -->
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="alert alert-info py-2 px-3">
+            Selecione <strong>apenas um</strong> alvo (Prefeitura <em>ou</em> Secretaria <em>ou</em> Escola/Unidade <em>ou</em> Setor).
+          </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_prefeitura">
+            <i class="fa-regular fa-building me-1"></i> Prefeitura
+          </label>
+          <select class="form-select escopo-input" id="id_prefeitura" name="prefeitura">
+            <option value="">— nenhuma —</option>
+            {% for p in prefeituras %}
+              <option value="{{ p.pk }}">{{ p.nome }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_secretaria">
+            <i class="fa-solid fa-building-columns me-1"></i> Secretaria
+          </label>
+          <select class="form-select escopo-input" id="id_secretaria" name="secretaria">
+            <option value="">— nenhuma —</option>
+            {% for s in secretarias %}
+              <option value="{{ s.pk }}">{{ s.prefeitura.nome }} — {{ s.nome }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_escola">
+            <i class="fa-solid fa-school me-1"></i> Escola / Unidade
+          </label>
+          <select class="form-select escopo-input" id="id_escola" name="escola">
+            <option value="">— nenhuma —</option>
+            {% for e in escolas %}
+              <option value="{{ e.pk }}">{{ e.secretaria.prefeitura.nome }} — {{ e.secretaria.nome }} — {{ e.nome_escola }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label" for="id_setor">
+            <i class="fa-solid fa-diagram-project me-1"></i> Setor
+          </label>
+          <select class="form-select escopo-input" id="id_setor" name="setor">
+            <option value="">— nenhuma —</option>
+            {% for st in setores %}
+              <option value="{{ st.pk }}">
+                {% if st.departamento %}
+                  {{ st.departamento.prefeitura|default_if_none:"" }}{% if st.departamento.prefeitura %} — {% endif %}
+                  {{ st.departamento.secretaria|default_if_none:"" }}{% if st.departamento.secretaria %} — {% endif %}
+                  {{ st.departamento.escola|default_if_none:"" }}{% if st.departamento.escola %} — {% endif %}
+                {% elif st.secretaria %}
+                  {{ st.secretaria.prefeitura }} — {{ st.secretaria }}
+                {% endif %}
+                {{ st.nome }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-grid d-md-flex gap-2">
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-check me-1"></i> Conceder acesso
+      </button>
+      <a href="{% url 'controle:scope_manager' %}" class="btn btn-outline-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i> Cancelar
+      </a>
+    </div>
+  </form>
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-secondary" href="{% url 'controle:scope_manager' %}">
+      <i class="fa-solid fa-rotate-left me-1"></i> Voltar
+    </a>
+  </div>
+</main>
+
+<!-- Rodapé -->
+<div class="banner-desenvolvido text-center py-2">
+  Desenvolvido por Alexandre Martins Vieira © 2025
+</div>
+
+<script>
+(function(){
+  // Garante a regra "somente um alvo": quando um select recebe valor, zera os demais
+  const inputs = Array.from(document.querySelectorAll('.escopo-input'));
+  function onChange(ev){
+    if (!ev.target.value) return;
+    inputs.forEach(sel => {
+      if (sel !== ev.target){ sel.value = ""; }
+    });
+  }
+  inputs.forEach(sel => sel.addEventListener('change', onChange));
+})();
+</script>
+</body>
+</html>

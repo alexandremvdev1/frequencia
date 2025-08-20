@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Editar Feriado</title>
+    <style>
+        body {
+            font-family: Tahoma;
+            margin: 40px;
+        }
+        h2 {
+            margin-bottom: 20px;
+        }
+        form {
+            max-width: 500px;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #aaa;
+            border-radius: 5px;
+        }
+        button {
+            margin-top: 25px;
+            background-color: #2b6cb0;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Editar Feriado</h2>
+
+<form method="post">
+    {% csrf_token %}
+    <label>Data:</label>
+    {{ form.data }}
+
+    <label>Descrição:</label>
+    {{ form.descricao }}
+
+    <button type="submit">Salvar Alterações</button>
+</form>
+
+</body>
+</html>

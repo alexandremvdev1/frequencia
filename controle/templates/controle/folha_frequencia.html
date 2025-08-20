@@ -1,0 +1,275 @@
+{% load controle_filters %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Folha de Frequência</title>
+    <style>
+        body { font-family: Tahoma, sans-serif; font-size: 8px; margin: 6px; color:#000; }
+        h2, h3 { text-align: center; margin: 2px 0; }
+
+        /* Faixa de logos */
+        .logo-strip{
+            width:100%;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+            margin: 2px 0 8px 0;
+        }
+        .logo-strip .slot{
+            flex:1 1 33%;
+            text-align:center;
+            min-height: 40px;
+        }
+        .logo-strip .slot.left{ text-align:left; }
+        .logo-strip .slot.right{ text-align:right; }
+        .logo-strip img{
+            max-height: 70px;       /* ajuste fino p/ caber no A4 */
+            width: auto;
+            object-fit: contain;
+        }
+
+        /* Cabeçalho textual (nomes) */
+        .header-org { text-align:center; margin: 0 0 8px 0; line-height: 1.3; }
+        .titulo-prefeitura   { font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .titulo-secretaria   { font-size: 10px; font-weight: 600; }
+        .titulo-departamento { font-size: 9px;  font-weight: 600; }
+
+        /* Bloco “Escola/Unidade” (somente texto agora) */
+        .header-escola { font-size: 9px; text-align: center; margin: 8px 0 8px 0; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 8px; }
+        th, td { border: 1px solid #838383; padding: 1px 3px; text-align: center; }
+        th { background-color: #f2f2f2; }
+        .assinatura { height: 18px; }
+        .feriado { color:#000; font-weight: bold; text-align: center; background-color:#dbdbdb; }
+        .planejamento { margin-top: 8px; }
+        .assinaturas-planejamento { margin-top: 20px; display: flex; justify-content: space-between; }
+        .assinaturas-planejamento div { width: 45%; text-align: center; }
+        .linha-assinatura { border-top: 1px solid #000; margin-top: 5px; display: inline-block; width: 130px; text-align: center; }
+        .tabela-func { margin-bottom: 4px; font-size: 8px; width: 100%; }
+        .tabela-func td, .tabela-func th { text-align: left; border: 1px solid #838383; padding: 4px; }
+        .col-small { width: 4%; }
+        .col-medium { width: 12.5%; }
+        .col-large { width: 33%; }
+        .col-extended { width: 15%; }
+
+        .assinatura-chefia { display:flex; justify-content:center; margin-top:50px; }
+        .assinatura-chefia .box { text-align:center; }
+        .assinatura-chefia .linha { border-top:1px solid #000; width:250px; margin:0 auto 4px auto; }
+        .assinatura-chefia .rotulo { margin:2px 0; font-weight:bold; font-size:10px; }
+        .assinatura-chefia .nome { margin:1px 0; font-size:9px; font-weight:bold; }
+        .assinatura-chefia .funcao { margin:0; font-size:8px; }
+    </style>
+</head>
+<body>
+
+<!-- Faixa de LOGOS (Prefeitura • Órgão • Secretaria) -->
+<div class="logo-strip">
+  <div class="slot left">
+    {% if logo_prefeitura %}
+      <img src="{{ logo_prefeitura }}" alt="Logo da Prefeitura">
+    {% endif %}
+  </div>
+  <div class="slot center">
+    {% if logo_orgao %}
+      <img src="{{ logo_orgao }}" alt="Logo do Órgão">
+    {% endif %}
+  </div>
+  <div class="slot right">
+    {% if logo_secretaria %}
+      <img src="{{ logo_secretaria }}" alt="Logo da Secretaria">
+    {% endif %}
+  </div>
+</div>
+
+<!-- Cabeçalho textual (institucional) -->
+<div class="header-org">
+    {% if header_prefeitura %}<div class="titulo-prefeitura">{{ header_prefeitura|upper }}</div>{% endif %}
+    {% if header_secretaria %}<div class="titulo-secretaria">{{ header_secretaria }}</div>{% endif %}
+    {% if header_departamento %}<div class="titulo-departamento">{{ header_departamento }}</div>{% endif %}
+</div>
+
+<!-- Escola / Unidade (apenas texto para evitar duplicar logo do Órgão) -->
+<div class="header-escola">
+    <strong>{{ escola.nome_escola }}</strong><br>
+    Endereço: {{ escola.endereco }}, {{ escola.numero }}, {{ escola.bairro }}, {{ escola.cidade }}/{{ escola.uf }}<br>
+    {% if escola.telefone %}Telefone: {{ escola.telefone }}{% endif %}{% if escola.email %} | E-mail: {{ escola.email }}{% endif %}
+</div>
+
+<table class="tabela-func">
+  <tr>
+      <td><strong>Nome:</strong> {{ funcionario.nome }}</td>
+      <td><strong>Matrícula:</strong> {{ funcionario.matricula }}</td>
+      <td><strong>Vínculo:</strong> {{ funcionario.get_tipo_vinculo_display|default:"—" }}</td>
+      <td rowspan="3" class="col-medium" style="text-align:center;font-size:10px;">
+          <strong>{{ nome_mes }}</strong><br><strong>{{ ano }}</strong>
+      </td>
+  </tr>
+  <tr>
+      <td><strong>Cargo:</strong> {{ funcionario.cargo }}</td>
+      <td><strong>Função:</strong> {{ funcionario.funcao }}</td>
+      <td><strong>Fonte pagadora:</strong> {{ funcionario.fonte_pagadora|default:"—" }}</td>
+  </tr>
+  <tr>
+      <td><strong>Data Admissão:</strong> {{ funcionario.data_admissao|date:"d/m/Y" }}</td>
+      <td colspan="2">
+          <strong>Lotação:</strong>
+          {% if header_secretaria %}{{ header_secretaria }}{% endif %}
+          {% if header_departamento %} • {{ header_departamento }}{% endif %}
+          {% if header_setor %} • {{ header_setor }}{% endif %}
+      </td>
+  </tr>
+</table>
+
+<p style="margin: 4px 0; text-align: center;">
+    <strong>HORÁRIO DE FUNCIONAMENTO - Matutino 07h00min às 11h25min - 06h30min às 12h30min / Vespertino 13h00min às 17h25min - 12h30min às 18h30min</strong>
+</p>
+
+{% with dias|filter_sabados_letivos as sabados %}
+  {% if sabados %}
+    <p style="margin: 4px 0; text-align: center;">
+      <strong>OBS: Conforme o calendário escolar, dia{% if sabados|length > 1 %}s{% endif %} </strong>
+      {% for s in sabados %}
+        {{ s.data|date:"d/m" }}{% if not forloop.last %}, {% endif %}
+      {% endfor %}
+      {% if sabados|length > 1 %} serão sábados letivos.{% else %} será sábado letivo.{% endif %}
+    </p>
+  {% endif %}
+{% endwith %}
+
+{% with d0=dias|first %}
+<table>
+    <thead>
+        <tr>
+            <th class="col-small">Data</th>
+            {% if d0.manha %}<th class="col-medium">Horário Manhã</th><th class="col-large">Ass. Manhã</th>{% endif %}
+            {% if d0.tarde %}<th class="col-medium">Horário Tarde</th><th class="col-large">Ass. Tarde</th>{% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for dia in dias %}
+            <tr>
+                <td>{{ dia.data|date:"d/m/Y" }}</td>
+
+                {% if funcionario.funcao|lower == "vigia" %}
+                    {% if dia.descricao|default:""|lower == "recesso" %}
+                        {% if d0.manha and d0.tarde %}
+                            <td colspan="4" class="feriado">RECESSO</td>
+                        {% elif d0.manha or d0.tarde %}
+                            <td colspan="2" class="feriado">RECESSO</td>
+                        {% endif %}
+                    {% elif dia.feriado %}
+                        {% if d0.manha and d0.tarde %}
+                            <td colspan="4" class="feriado">FERIADO - {{ dia.descricao }}</td>
+                        {% elif d0.manha or d0.tarde %}
+                            <td colspan="2" class="feriado">FERIADO - {{ dia.descricao }}</td>
+                        {% endif %}
+                    {% else %}
+                        {% if d0.manha %}<td>às</td><td class="assinatura"></td>{% endif %}
+                        {% if d0.tarde %}<td>às</td><td class="assinatura"></td>{% endif %}
+                    {% endif %}
+
+                {% else %}
+                    {% if dia.descricao|default:""|lower == "recesso" %}
+                        {% if d0.manha and d0.tarde %}
+                            <td colspan="4" class="feriado">RECESSO</td>
+                        {% elif d0.manha or d0.tarde %}
+                            <td colspan="2" class="feriado">RECESSO</td>
+                        {% endif %}
+                    {% elif dia.feriado %}
+                        {% if d0.manha and d0.tarde %}
+                            <td colspan="4" class="feriado">FERIADO - {{ dia.descricao }}</td>
+                        {% elif d0.manha or d0.tarde %}
+                            <td colspan="2" class="feriado">FERIADO - {{ dia.descricao }}</td>
+                        {% endif %}
+                    {% elif dia.sabado_letivo %}
+                        {% if d0.manha %}<td>{{ dia.manha.horario_inicio|time:"H\\hi\\m\\i\\n" }} às {{ dia.manha.horario_fim|time:"H\\hi\\m\\i\\n" }}</td><td class="assinatura"></td>{% endif %}
+                        {% if d0.tarde %}<td>{{ dia.tarde.horario_inicio|time:"H\\hi\\m\\i\\n" }} às {{ dia.tarde.horario_fim|time:"H\\hi\\m\\i\\n" }}</td><td class="assinatura"></td>{% endif %}
+                    {% elif dia.dia_semana|lower == 'sábado' or dia.dia_semana|lower == 'sabado' %}
+                        {% if d0.manha %}<td>--</td><td>Sábado</td>{% endif %}
+                        {% if d0.tarde %}<td>--</td><td>Sábado</td>{% endif %}
+                    {% elif dia.dia_semana|lower == 'domingo' %}
+                        {% if d0.manha %}<td>--</td><td>Domingo</td>{% endif %}
+                        {% if d0.tarde %}<td>--</td><td>Domingo</td>{% endif %}
+                    {% else %}
+                        {% if d0.manha %}
+                            <td>{% if dia.manha %}{{ dia.manha.horario_inicio|time:"H\\hi\\m\\i\\n" }} às {{ dia.manha.horario_fim|time:"H\\hi\\m\\i\\n" }}{% else %} -- {% endif %}</td>
+                            <td class="assinatura"></td>
+                        {% endif %}
+                        {% if d0.tarde %}
+                            <td>{% if dia.tarde %}{{ dia.tarde.horario_inicio|time:"H\\hi\\m\\i\\n" }} às {{ dia.tarde.horario_fim|time:"H\\hi\\m\\i\\n" }}{% else %} -- {% endif %}</td>
+                            <td class="assinatura"></td>
+                        {% endif %}
+                    {% endif %}
+                {% endif %}
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endwith %}
+
+{% if planejamento %}
+  <h3>Planejamento</h3>
+  <table>
+    <thead>
+      <tr>
+        <th class="col-small">Data</th>
+        <th class="col-small">Dia</th>
+        <th class="col-extended">Horário do Planejamento</th>
+        <th class="col-extended">Ass. Professor</th>
+        <th class="col-extended">Ass. Coordenador</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for dia in planejamento %}
+        <tr>
+          <td>{{ dia.data|date:"d/m/Y" }}</td>
+          <td>{{ dia.dia_semana }}</td>
+          <td>{{ dia.horario }}</td>
+          <td class="assinatura"></td>
+          <td class="assinatura"></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<p><strong>Observação:</strong> Encerrado em {{ ultimo_dia_mes|date:"d/m/Y" }} por
+    {% if chefe_setor_nome %}
+        {{ chefe_setor_nome }} — {{ chefe_setor_funcao }}
+    {% elif funcionario.funcao == "DIRETOR(A)" %}
+        {{ funcionario.nome }} — {{ funcionario.funcao }}
+    {% else %}
+        ANTONIA CELIA DE SOUSA SILVA — (Chefia Imediata)
+    {% endif %}.
+</p>
+
+<div class="assinatura-chefia">
+  <div class="box">
+    <div class="linha"></div>
+    <p class="rotulo">Assinatura da Chefia Imediata</p>
+    <p class="nome">
+      {% if chefe_setor_nome %}
+        {{ chefe_setor_nome }}
+      {% elif funcionario.funcao == "DIRETOR(A)" %}
+        {{ funcionario.nome }}
+      {% else %}
+        ANTONIA CELIA DE SOUSA SILVA
+      {% endif %}
+    </p>
+    <p class="funcao">
+      {% if chefe_setor_funcao %}
+        {{ chefe_setor_funcao }}
+      {% elif funcionario.funcao == "DIRETOR(A)" %}
+        {{ funcionario.funcao }}
+      {% else %}
+        Chefia Imediata
+      {% endif %}
+    </p>
+  </div>
+</div>
+
+</body>
+</html>
