@@ -1,33 +1,31 @@
-# render.yaml — blueprint do Render pro projeto "frequencia"
 services:
   - type: web
     name: frequencia
     env: python
     plan: free
 
-    # ===== BUILD (sem migrate; nada de 'rm', só Python) =====
     buildCommand: |
-      pip install -r requirements.txt
+      python -m pip install --upgrade pip
+      python -m pip install -r requirements.txt
+      python -V && which python
+      python -c "import sys; print('PY:', sys.executable)"
+      python -c 'import django; print("Django:", django.get_version())'
       python -c "import shutil; shutil.rmtree('staticfiles', ignore_errors=True)"
-      python -V
-      python -c "import os,django;os.environ.setdefault('DJANGO_SETTINGS_MODULE','frequencia.settings');django.setup();from django.conf import settings;print('Django',django.get_version());print('STATICFILES_STORAGE =',getattr(settings,'STATICFILES_STORAGE',None));print('STORAGES.staticfiles =',settings.STORAGES.get('staticfiles'))"
       python manage.py findstatic admin/js/unusable_password_field.js
       python manage.py collectstatic --noinput --no-post-process
 
-    # ===== START (migra ao subir; gunicorn via módulo) =====
     startCommand: |
-      python manage.py migrate --noinput && \
-      python -m gunicorn frequencia.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info
+      ./.venv/bin/python manage.py migrate --noinput && \
+      ./.venv/bin/python -m gunicorn frequencia.wsgi:application --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info
 
-    # ===== Env Vars =====
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.5
       - key: DEBUG
         value: "0"
       - key: DJANGO_SECRET_KEY
-        sync: false   # defina no painel (ou no Secrets do blueprint)
+        sync: false
       - key: DATABASE_URL
-        sync: false   # cole a URL do Neon no painel (veja abaixo)
+        sync: false
       - key: WHITENOISE_STRICT
         value: "0"
