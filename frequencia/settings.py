@@ -205,24 +205,26 @@ WHITENOISE_MANIFEST_STRICT = os.getenv("WHITENOISE_STRICT", "0") == "1"
 
 
 # =========================
-# STORAGES (Django 5) + aliases legados p/ compatibilidade
+# STORAGES (SAFE MODE: estáticos sem Manifest) + aliases legados
 # =========================
 if USE_CLOUDINARY:
     STORAGES = {
         "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
-        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+        # SAFE: sem Manifest para evitar MissingFileError no collectstatic
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
     }
     # Aliases legados (algumas libs ainda leem estes nomes)
     DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 else:
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+        # SAFE: sem Manifest para evitar MissingFileError no collectstatic
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
     }
     # Aliases legados (evitam AttributeError em libs antigas)
     DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
-    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 
 # =========================
