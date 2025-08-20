@@ -294,3 +294,8 @@ _s.STORAGES["staticfiles"] = {
     "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"
 }
 _s.STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
+
+# === ULTRA-SAFE: sem Manifest e sem compressão do WhiteNoise ===
+from django.conf import settings as _s
+_s.STORAGES["staticfiles"] = {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}
+_s.STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
