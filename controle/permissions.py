@@ -1,7 +1,7 @@
 # controle/permissions.py
 from __future__ import annotations
 
-from typing import Optional, Iterable, Callable, Any, Dict, Set, Tuple
+from typing import Optional, Callable, Any, Dict, Tuple
 
 from django.contrib import messages
 from django.db.models import Q, QuerySet
@@ -9,15 +9,38 @@ from django.shortcuts import redirect
 from django.urls import reverse
 
 from .models import (
-    Prefeitura, Secretaria, Escola, Departamento, Setor,
-    Funcionario, UserScope,
-    AcessoPrefeitura, AcessoSecretaria, AcessoEscola, AcessoSetor,
+    Prefeitura, Secretaria, Setor, Funcionario, UserScope,
+    AcessoPrefeitura, AcessoSecretaria, AcessoSetor,
     HorarioTrabalho, FolhaFrequencia, NivelAcesso,
 )
 
-# --- suporte opcional a controle por função/cargo (se existir no projeto)
+# ==== imports opcionais (novos e legados) ====================================
+# Novo: Órgão + AcessoÓrgão (se existirem no seu projeto)
 try:
-    from .models import FuncaoPermissao  # campos esperados: user, nome_funcao, nivel, secretaria(nullable), setor(nullable)
+    from .models import Orgao  # type: ignore
+except Exception:
+    Orgao = None  # type: ignore
+
+try:
+    from .models import AcessoOrgao  # type: ignore
+    HAS_ACESSO_ORGAO = True
+except Exception:
+    AcessoOrgao = None  # type: ignore
+    HAS_ACESSO_ORGAO = False
+
+# Legado: Escola/Departamento + AcessoEscola (se ainda existirem)
+try:
+    from .models import Escola, Departamento, AcessoEscola  # type: ignore
+    HAS_ESCOLA_DEPARTAMENTO = True
+except Exception:
+    Escola = None  # type: ignore
+    Departamento = None  # type: ignore
+    AcessoEscola = None  # type: ignore
+    HAS_ESCOLA_DEPARTAMENTO = False
+
+# Suporte opcional a controle por função/cargo
+try:
+    from .models import FuncaoPermissao  # campos: user, nome_funcao, nivel, secretaria(nullable), setor(nullable)
     HAS_FUNCAO_PERMISSAO = True
 except Exception:
     FuncaoPermissao = None  # type: ignore
@@ -48,33 +71,46 @@ GERENCIA = "GERENCIA"
 
 # ============================================================
 # Cadeia hierárquica a partir do Setor
-# (novo por Departamento + legado com secretaria no Setor)
+# (novo: orgao→secretaria→prefeitura; legados suportados)
 # ============================================================
-def _resolve_chain_from_setor(setor: Setor) -> Tuple[Escola | None, Secretaria | None, Prefeitura | None]:
-    escola = None
+def _resolve_chain_from_setor(setor: Setor) -> Tuple[Any | None, Secretaria | None, Prefeitura | None]:
+    """
+    Retorna (orgao, secretaria, prefeitura) a partir de um Setor,
+    fazendo fallback para campos legados quando presentes.
+    """
+    orgao = getattr(setor, "orgao", None) if hasattr(setor, "orgao") else None
     secretaria = None
     prefeitura = None
 
-    # legado direto no setor
+    # secretaria direta no setor (legado)
     if hasattr(setor, "secretaria") and getattr(setor, "secretaria_id", None):
         secretaria = setor.secretaria
 
-    # novo: via departamento
-    dep = getattr(setor, "departamento", None)
-    if dep:
-        if getattr(dep, "escola_id", None):
-            escola = dep.escola
-        if getattr(dep, "secretaria_id", None):
-            secretaria = dep.secretaria
-        if getattr(dep, "prefeitura_id", None):
-            prefeitura = dep.prefeitura
+    # secretaria por órgão (novo)
+    if not secretaria and orgao is not None and hasattr(orgao, "secretaria"):
+        secretaria = getattr(orgao, "secretaria", None)
 
-    # escalada
-    if escola and not secretaria:
-        secretaria = getattr(escola, "secretaria", None)
-    if secretaria and not prefeitura:
+    # prefeitura direta no setor (se existir)
+    if hasattr(setor, "prefeitura") and getattr(setor, "prefeitura_id", None):
+        prefeitura = setor.prefeitura
+
+    # prefeitura por secretaria (novo/legado)
+    if not prefeitura and secretaria is not None and hasattr(secretaria, "prefeitura"):
         prefeitura = getattr(secretaria, "prefeitura", None)
-    return escola, secretaria, prefeitura
+
+    # Fallback extra (legado via departamento → escola → secretaria → prefeitura)
+    if (not orgao or not secretaria or not prefeitura) and HAS_ESCOLA_DEPARTAMENTO and hasattr(setor, "departamento"):
+        dep = getattr(setor, "departamento", None)
+        if dep:
+            if not orgao and hasattr(dep, "escola"):
+                # não há 'orgao' no legado: mantemos None
+                pass
+            if not secretaria and hasattr(dep, "secretaria"):
+                secretaria = getattr(dep, "secretaria", None)
+            if not prefeitura and hasattr(dep, "prefeitura"):
+                prefeitura = getattr(dep, "prefeitura", None)
+
+    return orgao, secretaria, prefeitura
 
 
 # ============================================================
@@ -85,14 +121,15 @@ def user_scope(user) -> Dict[str, Any]:
     Retorna um dicionário com IDs permitidos por nível.
     Inclui escopos:
       - Admin (all=True)
-      - UserScope (prefeitura/secretaria/escola/departamento/setor)
-      - Acesso* legado (prefeitura/secretaria/escola/setor)
+      - UserScope (prefeitura/secretaria/orgao/setor) [+ legado: escola/departamento]
+      - Acesso* (Prefeitura/Secretaria/[Órgão]/Setor e legado Escola)
       - Unidade do próprio funcionário (cadeia do setor)
     """
-    scope = {
+    scope: Dict[str, Any] = {
         "all": False,
-        "prefeituras": set(), "secretarias": set(), "escolas": set(),
-        "departamentos": set(), "setores": set(),
+        "prefeituras": set(), "secretarias": set(), "orgaos": set(), "setores": set(),
+        # legados (não usados nos filtros novos, mas aceitos se existirem)
+        "escolas": set(), "departamentos": set(),
     }
 
     if not _is_auth(user):
@@ -102,23 +139,27 @@ def user_scope(user) -> Dict[str, Any]:
         scope["all"] = True
         return scope
 
-    # --- UserScope (novo)
+    # --- UserScope (novo + legado)
     try:
         for s in user.scopes.all():
-            if s.prefeitura_id:   scope["prefeituras"].add(s.prefeitura_id)
-            if s.secretaria_id:   scope["secretarias"].add(s.secretaria_id)
-            if s.escola_id:       scope["escolas"].add(s.escola_id)
-            if s.departamento_id: scope["departamentos"].add(s.departamento_id)
-            if s.setor_id:        scope["setores"].add(s.setor_id)
+            if getattr(s, "prefeitura_id", None):   scope["prefeituras"].add(s.prefeitura_id)
+            if getattr(s, "secretaria_id", None):   scope["secretarias"].add(s.secretaria_id)
+            if getattr(s, "orgao_id", None):        scope["orgaos"].add(s.orgao_id)
+            if getattr(s, "setor_id", None):        scope["setores"].add(s.setor_id)
+            if HAS_ESCOLA_DEPARTAMENTO and getattr(s, "escola_id", None):
+                scope["escolas"].add(s.escola_id)
+            if HAS_ESCOLA_DEPARTAMENTO and getattr(s, "departamento_id", None):
+                scope["departamentos"].add(s.departamento_id)
     except Exception:
         pass
 
-    # --- Acesso* (legado)
+    # --- Acesso* (atuais + legado escola)
     try:
         for x in AcessoPrefeitura.objects.filter(user=user).values_list("prefeitura_id", flat=True):
             scope["prefeituras"].add(x)
     except Exception:
         pass
+
     try:
         for x in AcessoSecretaria.objects.filter(user=user).select_related("secretaria__prefeitura"):
             scope["secretarias"].add(x.secretaria_id)
@@ -126,36 +167,54 @@ def user_scope(user) -> Dict[str, Any]:
                 scope["prefeituras"].add(x.secretaria.prefeitura_id)
     except Exception:
         pass
-    try:
-        for x in AcessoEscola.objects.filter(user=user).select_related("escola__secretaria__prefeitura"):
-            scope["escolas"].add(x.escola_id)
-            if x.escola and x.escola.secretaria_id:
-                scope["secretarias"].add(x.escola.secretaria_id)
-                if x.escola.secretaria.prefeitura_id:
-                    scope["prefeituras"].add(x.escola.secretaria.prefeitura_id)
-    except Exception:
-        pass
+
+    if HAS_ACESSO_ORGAO:
+        try:
+            for x in AcessoOrgao.objects.filter(user=user).select_related("orgao__secretaria__prefeitura"):
+                scope["orgaos"].add(x.orgao_id)
+                orgao = getattr(x, "orgao", None)
+                if orgao and getattr(orgao, "secretaria_id", None):
+                    scope["secretarias"].add(orgao.secretaria_id)
+                    sec = getattr(orgao, "secretaria", None)
+                    if sec and getattr(sec, "prefeitura_id", None):
+                        scope["prefeituras"].add(sec.prefeitura_id)
+        except Exception:
+            pass
+
     try:
         for x in AcessoSetor.objects.filter(user=user).select_related(
-            "setor__departamento__secretaria__prefeitura", "setor__secretaria"
+            "setor__orgao__secretaria__prefeitura", "setor__secretaria", "setor__prefeitura"
         ):
             scope["setores"].add(x.setor_id)
-            es, sec, pref = _resolve_chain_from_setor(x.setor)
-            if es:   scope["escolas"].add(es.id)
-            if sec:  scope["secretarias"].add(sec.id)
-            if pref: scope["prefeituras"].add(pref.id)
+            org, sec, pref = _resolve_chain_from_setor(x.setor)
+            if org and getattr(org, "id", None):  scope["orgaos"].add(org.id)
+            if sec and getattr(sec, "id", None):  scope["secretarias"].add(sec.id)
+            if pref and getattr(pref, "id", None): scope["prefeituras"].add(pref.id)
     except Exception:
         pass
+
+    if HAS_ESCOLA_DEPARTAMENTO and AcessoEscola is not None:
+        try:
+            for x in AcessoEscola.objects.filter(user=user).select_related("escola__secretaria__prefeitura"):
+                scope["escolas"].add(x.escola_id)
+                esc = getattr(x, "escola", None)
+                if esc and getattr(esc, "secretaria_id", None):
+                    scope["secretarias"].add(esc.secretaria_id)
+                    sec = getattr(esc, "secretaria", None)
+                    if sec and getattr(sec, "prefeitura_id", None):
+                        scope["prefeituras"].add(sec.prefeitura_id)
+        except Exception:
+            pass
 
     # --- cadeia do próprio funcionário
     try:
         f = getattr(user, "funcionario", None)
         if f and f.setor_id:
             scope["setores"].add(f.setor_id)
-            es, sec, pref = _resolve_chain_from_setor(f.setor)
-            if es:   scope["escolas"].add(es.id)
-            if sec:  scope["secretarias"].add(sec.id)
-            if pref: scope["prefeituras"].add(pref.id)
+            org, sec, pref = _resolve_chain_from_setor(f.setor)
+            if org and getattr(org, "id", None):  scope["orgaos"].add(org.id)
+            if sec and getattr(sec, "id", None):  scope["secretarias"].add(sec.id)
+            if pref and getattr(pref, "id", None): scope["prefeituras"].add(pref.id)
     except Exception:
         pass
 
@@ -166,14 +225,21 @@ def user_scope(user) -> Dict[str, Any]:
 # Filtros por escopo
 # ============================================================
 def _q_setor_scope(s: Dict[str, Any]) -> Q:
-    return (
+    cond = (
         Q(pk__in=s["setores"])
-        | Q(departamento_id__in=s["departamentos"])
-        | Q(departamento__escola_id__in=s["escolas"])
-        | Q(departamento__secretaria_id__in=s["secretarias"])
-        | Q(departamento__prefeitura_id__in=s["prefeituras"])
-        | Q(secretaria_id__in=s["secretarias"])              # legado (campo direto no Setor)
+        | Q(orgao_id__in=s["orgaos"])
+        | Q(secretaria_id__in=s["secretarias"])                  # legado: secretaria no Setor
+        | Q(orgao__secretaria_id__in=s["secretarias"])
+        | Q(prefeitura_id__in=s["prefeituras"])                  # se houver campo direto
+        | Q(secretaria__prefeitura_id__in=s["prefeituras"])
+        | Q(orgao__secretaria__prefeitura_id__in=s["prefeituras"])
     )
+    # compat extra com legado por Departamento, se houver relação
+    if HAS_ESCOLA_DEPARTAMENTO and hasattr(Setor, "departamento"):
+        cond = cond | Q(departamento_id__in=s["departamentos"]) \
+                    | Q(departamento__secretaria_id__in=s["secretarias"]) \
+                    | Q(departamento__prefeitura_id__in=s["prefeituras"])  # noqa
+    return cond
 
 def filter_setores_by_scope(qs: QuerySet[Setor], user) -> QuerySet[Setor]:
     s = user_scope(user)
@@ -187,12 +253,17 @@ def filter_funcionarios_by_scope(qs: QuerySet[Funcionario], user) -> QuerySet[Fu
         return qs
     cond = (
         Q(setor_id__in=s["setores"])
-        | Q(setor__departamento_id__in=s["departamentos"])
-        | Q(setor__departamento__escola_id__in=s["escolas"])
-        | Q(setor__departamento__secretaria_id__in=s["secretarias"])
-        | Q(setor__departamento__prefeitura_id__in=s["prefeituras"])
-        | Q(setor__secretaria_id__in=s["secretarias"])  # legado
+        | Q(setor__orgao_id__in=s["orgaos"])
+        | Q(setor__secretaria_id__in=s["secretarias"])                 # legado
+        | Q(setor__orgao__secretaria_id__in=s["secretarias"])
+        | Q(setor__prefeitura_id__in=s["prefeituras"])                 # se houver campo direto
+        | Q(setor__secretaria__prefeitura_id__in=s["prefeituras"])
+        | Q(setor__orgao__secretaria__prefeitura_id__in=s["prefeituras"])
     )
+    if HAS_ESCOLA_DEPARTAMENTO and hasattr(Setor, "departamento"):
+        cond = cond | Q(setor__departamento_id__in=s["departamentos"]) \
+                    | Q(setor__departamento__secretaria_id__in=s["secretarias"]) \
+                    | Q(setor__departamento__prefeitura_id__in=s["prefeituras"])  # noqa
     return qs.filter(cond).distinct()
 
 def filter_folhas_by_scope(qs: QuerySet[FolhaFrequencia], user) -> QuerySet[FolhaFrequencia]:
@@ -201,12 +272,17 @@ def filter_folhas_by_scope(qs: QuerySet[FolhaFrequencia], user) -> QuerySet[Folh
         return qs
     cond = (
         Q(funcionario__setor_id__in=s["setores"])
-        | Q(funcionario__setor__departamento_id__in=s["departamentos"])
-        | Q(funcionario__setor__departamento__escola_id__in=s["escolas"])
-        | Q(funcionario__setor__departamento__secretaria_id__in=s["secretarias"])
-        | Q(funcionario__setor__departamento__prefeitura_id__in=s["prefeituras"])
-        | Q(funcionario__setor__secretaria_id__in=s["secretarias"])  # legado
+        | Q(funcionario__setor__orgao_id__in=s["orgaos"])
+        | Q(funcionario__setor__secretaria_id__in=s["secretarias"])                         # legado
+        | Q(funcionario__setor__orgao__secretaria_id__in=s["secretarias"])
+        | Q(funcionario__setor__prefeitura_id__in=s["prefeituras"])                         # se houver campo direto
+        | Q(funcionario__setor__secretaria__prefeitura_id__in=s["prefeituras"])
+        | Q(funcionario__setor__orgao__secretaria__prefeitura_id__in=s["prefeituras"])
     )
+    if HAS_ESCOLA_DEPARTAMENTO and hasattr(Setor, "departamento"):
+        cond = cond | Q(funcionario__setor__departamento_id__in=s["departamentos"]) \
+                    | Q(funcionario__setor__departamento__secretaria_id__in=s["secretarias"]) \
+                    | Q(funcionario__setor__departamento__prefeitura_id__in=s["prefeituras"])  # noqa
     return qs.filter(cond).distinct()
 
 def filter_horarios_by_scope(qs: QuerySet[HorarioTrabalho], user) -> QuerySet[HorarioTrabalho]:
@@ -215,12 +291,17 @@ def filter_horarios_by_scope(qs: QuerySet[HorarioTrabalho], user) -> QuerySet[Ho
         return qs
     cond = (
         Q(funcionario__setor_id__in=s["setores"])
-        | Q(funcionario__setor__departamento_id__in=s["departamentos"])
-        | Q(funcionario__setor__departamento__escola_id__in=s["escolas"])
-        | Q(funcionario__setor__departamento__secretaria_id__in=s["secretarias"])
-        | Q(funcionario__setor__departamento__prefeitura_id__in=s["prefeituras"])
-        | Q(funcionario__setor__secretaria_id__in=s["secretarias"])  # legado
+        | Q(funcionario__setor__orgao_id__in=s["orgaos"])
+        | Q(funcionario__setor__secretaria_id__in=s["secretarias"])                         # legado
+        | Q(funcionario__setor__orgao__secretaria_id__in=s["secretarias"])
+        | Q(funcionario__setor__prefeitura_id__in=s["prefeituras"])                         # se houver campo direto
+        | Q(funcionario__setor__secretaria__prefeitura_id__in=s["prefeituras"])
+        | Q(funcionario__setor__orgao__secretaria__prefeitura_id__in=s["prefeituras"])
     )
+    if HAS_ESCOLA_DEPARTAMENTO and hasattr(Setor, "departamento"):
+        cond = cond | Q(funcionario__setor__departamento_id__in=s["departamentos"]) \
+                    | Q(funcionario__setor__departamento__secretaria_id__in=s["secretarias"]) \
+                    | Q(funcionario__setor__departamento__prefeitura_id__in=s["prefeituras"])  # noqa
     return qs.filter(cond).distinct()
 
 
@@ -232,9 +313,13 @@ def assert_can_access_funcionario(user, funcionario: Funcionario) -> bool:
         return True
     return filter_funcionarios_by_scope(Funcionario.objects.filter(id=funcionario.id), user).exists()
 
-def deny_and_redirect(request, message="Você não tem permissão para acessar este recurso.", to_name="painel_controle"):
+def deny_and_redirect(request, message="Você não tem permissão para acessar este recurso.", to: Optional[str] = None, to_name: Optional[str] = None):
+    """
+    Aceita 'to=' ou 'to_name='; se nenhum for informado, usa 'controle:painel_controle'.
+    """
     messages.error(request, message)
-    return redirect(reverse(to_name))
+    target = to or to_name or "controle:painel_controle"
+    return redirect(reverse(target))
 
 
 # ============================================================
@@ -268,10 +353,16 @@ def has_funcao_permission(user, funcionario: Funcionario, required_nivel: str = 
     # 2) se existir modelo FuncaoPermissao, ele é a fonte da verdade
     if HAS_FUNCAO_PERMISSAO and funcao_alvo:
         setor = getattr(funcionario, "setor", None)
+
+        # resolve secretaria (novo ou legado)
         sec = None
         if setor:
-            # usa secretaria_oficial se existir no seu Setor
-            sec = getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)
+            # propriedades utilitárias podem existir no seu Setor; caímos para fallback
+            sec = getattr(setor, "secretaria_resolvida", None)
+            if not sec:
+                sec = getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)
+            if not sec and getattr(setor, "orgao", None):
+                sec = getattr(setor.orgao, "secretaria", None)
 
         qs = FuncaoPermissao.objects.filter(
             user=user,
@@ -284,7 +375,6 @@ def has_funcao_permission(user, funcionario: Funcionario, required_nivel: str = 
         for p in qs:
             if _nivel_to_int(p.nivel) >= req:
                 return True
-        # sem permissão explícita → nega
         return False
 
     # 3) fallback: se não há modelo, permite GERENCIA para funções padrão
@@ -304,9 +394,19 @@ def has_funcao_permission(user, funcionario: Funcionario, required_nivel: str = 
 def _secretaria_do_setor(setor: Optional[Setor]) -> Optional[Secretaria]:
     if not setor:
         return None
-    if getattr(setor, "departamento", None) and setor.departamento.secretaria_id:
-        return setor.departamento.secretaria
-    return getattr(setor, "secretaria", None)
+    # prioridade: helpers novos se existirem
+    sec = getattr(setor, "secretaria_resolvida", None)
+    if sec:
+        return sec
+    # compat: oficial/legado
+    if hasattr(setor, "secretaria_oficial") and getattr(setor, "secretaria_oficial", None):
+        return setor.secretaria_oficial
+    if hasattr(setor, "secretaria") and getattr(setor, "secretaria", None):
+        return setor.secretaria
+    # via órgão
+    if hasattr(setor, "orgao") and getattr(setor, "orgao", None):
+        return getattr(setor.orgao, "secretaria", None)
+    return None
 
 def _has_leitura_em_secretaria(user, secretaria: Optional[Secretaria]) -> bool:
     if not _is_auth(user) or not secretaria:
@@ -430,7 +530,7 @@ def user_can_feature(user, feature: str, alvo: Optional[object] = None) -> bool:
     Verifica se o usuário pode usar 'feature'.
     - Respeita 'superuser_only'
     - Respeita nível (LEITURA/GERENCIA)
-    - Aplica escopo por 'alvo' quando informado (Funcionario/Setor/Secretaria/...)
+    - Aplica escopo por 'alvo' quando informado (Funcionario/Setor/Secretaria/Prefeitura)
     - Para GERENCIA sobre servidores: inclui regra de função (has_funcao_permission)
     """
     if not _is_auth(user):
@@ -449,9 +549,8 @@ def user_can_feature(user, feature: str, alvo: Optional[object] = None) -> bool:
     if alvo is None:
         if _user_is_admin(user):
             return True
-        sc = user_scope(user)
+        # GERENCIA global: precisa ter algum escopo GERENCIA
         if nivel == GERENCIA:
-            # tem algum escopo GERENCIA via UserScope ou AcessoSecretaria GERENCIA?
             try:
                 if user.scopes.filter(nivel=UserScope.Nivel.GERENCIA).exists():
                     return True
@@ -462,26 +561,29 @@ def user_can_feature(user, feature: str, alvo: Optional[object] = None) -> bool:
                     return True
             except Exception:
                 pass
+            try:
+                if AcessoPrefeitura.objects.filter(user=user, nivel=NivelAcesso.GERENCIA).exists():
+                    return True
+            except Exception:
+                pass
+            if HAS_ACESSO_ORGAO:
+                try:
+                    if AcessoOrgao.objects.filter(user=user, nivel=NivelAcesso.GERENCIA).exists():
+                        return True
+                except Exception:
+                    pass
             return False
-        return any(sc[k] for k in ("prefeituras", "secretarias", "escolas", "departamentos", "setores"))
+        # LEITURA: qualquer escopo já basta
+        sc = user_scope(user)
+        return any(sc[k] for k in ("prefeituras", "secretarias", "orgaos", "setores", "escolas", "departamentos"))
 
-    # Com alvo
+    # Com alvo específico
     if isinstance(alvo, Funcionario):
         return _has_gerencia_em_funcionario(user, alvo) if nivel == GERENCIA else _has_leitura_em_funcionario(user, alvo)
     if isinstance(alvo, Setor):
         return _has_gerencia_em_setor(user, alvo)       if nivel == GERENCIA else _has_leitura_em_setor(user, alvo)
     if isinstance(alvo, Secretaria):
         return _has_gerencia_em_secretaria(user, alvo)  if nivel == GERENCIA else _has_leitura_em_secretaria(user, alvo)
-    if isinstance(alvo, Departamento):
-        if alvo.secretaria:
-            return user_can_feature(user, feature, alvo.secretaria)
-        if alvo.escola and alvo.escola.secretaria:
-            return user_can_feature(user, feature, alvo.escola.secretaria)
-        if alvo.prefeitura:
-            return _user_is_admin(user) if nivel == GERENCIA else True
-        return False
-    if isinstance(alvo, Escola):
-        return user_can_feature(user, feature, alvo.secretaria) if alvo.secretaria else _user_is_admin(user)
     if isinstance(alvo, Prefeitura):
         if _user_is_admin(user):
             return True
@@ -491,6 +593,18 @@ def user_can_feature(user, feature: str, alvo: Optional[object] = None) -> bool:
             return user.scopes.filter(prefeitura=alvo).exists()
         except Exception:
             return False
+
+    # Alvos legados (se ainda existirem no seu projeto)
+    if HAS_ESCOLA_DEPARTAMENTO and Escola is not None and isinstance(alvo, Escola):
+        return user_can_feature(user, feature, getattr(alvo, "secretaria", None)) if getattr(alvo, "secretaria", None) else _user_is_admin(user)
+    if HAS_ESCOLA_DEPARTAMENTO and Departamento is not None and isinstance(alvo, Departamento):
+        sec = getattr(alvo, "secretaria", None)
+        if sec:
+            return user_can_feature(user, feature, sec)
+        pref = getattr(alvo, "prefeitura", None)
+        if pref:
+            return _user_is_admin(user) if nivel == GERENCIA else True
+        return False
 
     return False
 

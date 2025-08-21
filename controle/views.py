@@ -11,38 +11,34 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.views import LoginView, LogoutView
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.db.models.functions import Lower
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.safestring import mark_safe
-from django.urls import reverse
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.shortcuts import render, redirect
-from django.contrib import messages
+from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods
-from django.db import transaction
-from django.db.models import Q
-from .forms import RecessoBulkForm
-from .models import Setor, Funcionario, RecessoFuncionario
-from datetime import date
-from .models import RecessoFuncionario
+from django.core.paginator import Paginator
 
-from .models import (
-    Prefeitura, Secretaria, Escola, Departamento, Setor, Funcionario,
-    Feriado, HorarioTrabalho, SabadoLetivo, FolhaFrequencia, UserScope,
-)
 from .forms import (
     HorarioTrabalhoForm,
     FeriadoForm,
-    ImportacaoFuncionarioForm,
+    ImportacaoFuncionarioForm,   # se não usar, pode remover
     GerarFolhasIndividuaisForm,
     FuncionarioForm,
+    RecessoBulkForm,
+    RecessoFuncionarioForm,
 )
+
+from .models import (
+    Prefeitura, Secretaria, Orgao, Setor, Funcionario,
+    Feriado, HorarioTrabalho, SabadoLetivo, FolhaFrequencia, UserScope,
+    RecessoFuncionario,
+)
+
 # ---- permissões/escopo ----
 from .permissions import (
     user_scope,
@@ -58,21 +54,19 @@ User = get_user_model()
 
 # =====================================================================
 # BLOCO: Gestão de Acessos / Escopos (superadmin)
-# (unificado; duplicatas removidas)
 # =====================================================================
 
 def _is_superadmin(user):
     return user.is_authenticated and user.is_superuser
 
 def _only_superuser(user):
-    # Mantido por compatibilidade com as views que usam esse nome
     return _is_superadmin(user)
 
 @login_required
 @user_passes_test(_only_superuser)
 def acessos_conceder(request):
     """
-    Concede um escopo para um usuário: Prefeitura OU Secretaria OU Escola OU Setor (exatamente 1).
+    Concede um escopo para um usuário: Prefeitura OU Secretaria OU Órgão OU Setor (exatamente 1).
     Nível: LEITURA ou GERENCIA.
     """
     if request.method == "POST":
@@ -81,10 +75,9 @@ def acessos_conceder(request):
 
         pref_id = request.POST.get("prefeitura") or ""
         sec_id  = request.POST.get("secretaria") or ""
-        esc_id  = request.POST.get("escola") or ""
+        org_id  = request.POST.get("orgao") or ""
         set_id  = request.POST.get("setor") or ""
 
-        # valida usuário
         if not user_id:
             messages.error(request, "Selecione um usuário.")
             return redirect("controle:acessos_conceder")
@@ -95,24 +88,21 @@ def acessos_conceder(request):
             messages.error(request, "Usuário inválido.")
             return redirect("controle:acessos_conceder")
 
-        # valida escolha única de alvo
-        escolhas = [("prefeitura_id", pref_id), ("secretaria_id", sec_id),
-                    ("escola_id", esc_id), ("setor_id", set_id)]
-        escolhas_preenchidas = [(k, v) for k, v in escolhas if v]
-
-        if len(escolhas_preenchidas) != 1:
-            messages.error(
-                request,
-                "Selecione exatamente um nível de alvo (Prefeitura OU Secretaria OU Escola OU Setor)."
-            )
+        escolhas = [
+            ("prefeitura_id", pref_id),
+            ("secretaria_id", sec_id),
+            ("orgao_id", org_id),
+            ("setor_id", set_id),
+        ]
+        preenchidas = [(k, v) for k, v in escolhas if v]
+        if len(preenchidas) != 1:
+            messages.error(request, "Selecione exatamente um nível de alvo (Prefeitura OU Secretaria OU Órgão OU Setor).")
             return redirect("controle:acessos_conceder")
 
-        # monta kwargs
         kwargs = {"user": alvo_user, "nivel": nivel}
-        chave, valor = escolhas_preenchidas[0]
+        chave, valor = preenchidas[0]
         kwargs[chave] = valor
 
-        # evita duplicidade
         scope, created = UserScope.objects.get_or_create(**kwargs)
         if created:
             messages.success(request, "Acesso concedido com sucesso.")
@@ -123,16 +113,13 @@ def acessos_conceder(request):
 
     # GET — carrega listas para selects
     contexto = {
-        "usuarios": User.objects.order_by("username", "first_name"),
+        "usuarios": User.objects.order_by("username", "first_name", "last_name"),
         "prefeituras": Prefeitura.objects.order_by("nome"),
         "secretarias": Secretaria.objects.select_related("prefeitura").order_by("prefeitura__nome", "nome"),
-        "escolas": Escola.objects.select_related("secretaria").order_by("secretaria__nome", "nome_escola"),
-        "setores": Setor.objects.select_related("departamento", "secretaria").order_by("nome"),
+        "orgaos": Orgao.objects.select_related("secretaria", "secretaria__prefeitura").order_by("secretaria__prefeitura__nome", "secretaria__nome", "nome"),
+        "setores": Setor.objects.select_related("prefeitura", "secretaria", "orgao").order_by("nome"),
         "niveis": [("LEITURA", "Leitura"), ("GERENCIA", "Gerenciar (CRUD)")],
-        # últimos escopos criados (para conferência rápida)
-        "escopos_recentes": UserScope.objects.select_related(
-            "user", "prefeitura", "secretaria", "escola", "setor"
-        ).order_by("-id")[:25],
+        "escopos_recentes": UserScope.objects.select_related("user", "prefeitura", "secretaria", "orgao", "setor").order_by("-id")[:25],
     }
     return render(request, "controle/acessos_conceder.html", contexto)
 
@@ -143,7 +130,7 @@ def acessos_revogar(request):
     Lista e permite revogar escopos (UserScope) já concedidos.
     Filtro por usuário/entidade via GET ?q=
     """
-    qs = UserScope.objects.select_related("user", "prefeitura", "secretaria", "escola", "setor")
+    qs = UserScope.objects.select_related("user", "prefeitura", "secretaria", "orgao", "setor")
     q = (request.GET.get("q") or "").strip()
 
     if q:
@@ -153,7 +140,7 @@ def acessos_revogar(request):
             Q(user__last_name__icontains=q) |
             Q(prefeitura__nome__icontains=q) |
             Q(secretaria__nome__icontains=q) |
-            Q(escola__nome_escola__icontains=q) |
+            Q(orgao__nome__icontains=q) |
             Q(setor__nome__icontains=q)
         )
 
@@ -162,7 +149,6 @@ def acessos_revogar(request):
         scope = get_object_or_404(UserScope, pk=scope_id)
         scope.delete()
         messages.success(request, "Acesso revogado.")
-        # mantém o filtro atual
         url = reverse("controle:acessos_revogar")
         if q:
             url += f"?q={q}"
@@ -170,8 +156,7 @@ def acessos_revogar(request):
 
     contexto = {
         "q": q,
-        "escopos": qs.order_by("user__username", "prefeitura__nome",
-                               "secretaria__nome", "escola__nome_escola", "setor__nome"),
+        "escopos": qs.order_by("user__username", "prefeitura__nome", "secretaria__nome", "orgao__nome", "setor__nome"),
         "usuarios": User.objects.order_by("username", "first_name", "last_name"),
     }
     return render(request, "controle/acessos_revogar.html", contexto)
@@ -188,9 +173,9 @@ def scope_manager(request):
         action = request.POST.get("action")
 
         if action == "add":
-            user_id  = request.POST.get("user_id")
-            nivel    = request.POST.get("nivel") or UserScope.Nivel.GERENCIA
-            alvo_tipo = request.POST.get("alvo_tipo")   # prefeitura/secretaria/escola/departamento/setor
+            user_id   = request.POST.get("user_id")
+            nivel     = request.POST.get("nivel") or UserScope.Nivel.GERENCIA
+            alvo_tipo = request.POST.get("alvo_tipo")   # prefeitura/secretaria/orgao/setor
             alvo_id   = request.POST.get("alvo_id")
 
             if not (user_id and alvo_tipo and alvo_id):
@@ -206,19 +191,17 @@ def scope_manager(request):
             scope_kwargs = {
                 "user_id": user_id,
                 "nivel": nivel,
-                "prefeitura": None, "secretaria": None, "escola": None, "departamento": None, "setor": None,
+                "prefeitura": None, "secretaria": None, "orgao": None, "setor": None,
             }
 
             if alvo_tipo == "prefeitura":
                 scope_kwargs["prefeitura_id"] = alvo_id_int
             elif alvo_tipo == "secretaria":
-                scope_kwargs["secretaria_id"] = alvo_id_int
-            elif alvo_tipo == "escola":
-                scope_kwargs["escola_id"] = alvo_id_int
-            elif alvo_tipo == "departamento":
-                scope_kwargs["departamento_id"] = alvo_id_int
+                scope_kwargs["secretaria_id"]  = alvo_id_int
+            elif alvo_tipo == "orgao":
+                scope_kwargs["orgao_id"]       = alvo_id_int
             elif alvo_tipo == "setor":
-                scope_kwargs["setor_id"] = alvo_id_int
+                scope_kwargs["setor_id"]       = alvo_id_int
             else:
                 messages.error(request, "Tipo de alvo inválido.")
                 return redirect("controle:scope_manager")
@@ -238,26 +221,21 @@ def scope_manager(request):
             return redirect("controle:scope_manager")
 
     scopes = (UserScope.objects
-              .select_related("user", "prefeitura", "secretaria", "escola", "departamento", "setor")
+              .select_related("user", "prefeitura", "secretaria", "orgao", "setor")
               .order_by("user__username"))
 
-    prefeituras   = Prefeitura.objects.order_by("nome")
-    secretarias   = Secretaria.objects.select_related("prefeitura").order_by("prefeitura__nome", "nome")
-    escolas       = Escola.objects.select_related("secretaria", "secretaria__prefeitura").order_by("nome_escola")
-    departamentos = Departamento.objects.select_related("prefeitura", "secretaria", "escola").order_by("nome")
-    setores       = Setor.objects.select_related(
-        "departamento", "departamento__prefeitura", "departamento__secretaria", "departamento__escola", "secretaria"
-    ).order_by("nome")
-
-    users = User.objects.order_by("username", "first_name", "last_name")
+    prefeituras = Prefeitura.objects.order_by("nome")
+    secretarias = Secretaria.objects.select_related("prefeitura").order_by("prefeitura__nome", "nome")
+    orgaos      = Orgao.objects.select_related("secretaria", "secretaria__prefeitura").order_by("secretaria__prefeitura__nome", "secretaria__nome", "nome")
+    setores     = Setor.objects.select_related("prefeitura", "secretaria", "orgao").order_by("nome")
+    users       = User.objects.order_by("username", "first_name", "last_name")
 
     ctx = {
         "scopes": scopes,
         "users": users,
         "prefeituras": prefeituras,
         "secretarias": secretarias,
-        "escolas": escolas,
-        "departamentos": departamentos,
+        "orgaos": orgaos,
         "setores": setores,
     }
     return render(request, "controle/scope_manager.html", ctx)
@@ -265,17 +243,13 @@ def scope_manager(request):
 @login_required
 @user_passes_test(_is_superadmin)
 def scope_debug(request):
-    """
-    Mostra os escopos do usuário logado (superadmin se vê aqui).
-    """
     meus_scopes = (request.user.scopes
-                   .select_related("prefeitura", "secretaria", "escola", "departamento", "setor")
+                   .select_related("prefeitura", "secretaria", "orgao", "setor")
                    .all())
-
     return render(request, "controle/scope_debug.html", {"meus_scopes": meus_scopes})
 
 # =====================================================================
-# BLOCO: Autenticação (Login / Logout)
+# Autenticação (Login / Logout)
 # =====================================================================
 
 class PainelLoginView(LoginView):
@@ -284,7 +258,9 @@ class PainelLoginView(LoginView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx["escola"] = Escola.objects.first()
+        # Compat: alguns templates podem esperar "escola". Mantemos como None.
+        ctx["orgao"] = Orgao.objects.select_related("secretaria", "secretaria__prefeitura").first()
+        ctx["escola"] = None
         return ctx
 
 class PainelLogoutView(LogoutView):
@@ -306,9 +282,6 @@ meses_pt = {
 
 # -------- helper p/ extrair URL de logo (Cloudinary/FileField) --------
 def _safe_logo_url(obj, attr='logo'):
-    """
-    Retorna obj.logo.url (ou None) com segurança.
-    """
     if not obj:
         return None
     try:
@@ -322,6 +295,9 @@ def _safe_logo_url(obj, attr='logo'):
     except Exception:
         return None
 
+# =====================================================================
+# Folha de frequência (individual)
+# =====================================================================
 
 @login_required
 def gerar_folha_frequencia(request, funcionario_id, mes, ano):
@@ -331,10 +307,13 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
     if not assert_can_access_funcionario(request.user, funcionario):
         return deny_and_redirect(request, "Você não pode gerar/visualizar folhas deste servidor.")
 
-    # Escola preferencial pela hierarquia do funcionário; fallback para a primeira
-    escola = getattr(funcionario, "escola", None) or Escola.objects.first()
+    # Hierarquia resolvida
+    setor = getattr(funcionario, "setor", None)
+    orgao = getattr(setor, "orgao", None) if setor else None
+    secretaria_obj = setor.secretaria_resolvida if setor else None
+    prefeitura_obj = setor.prefeitura_resolvida if setor else None
 
-    # -------- Chefe do setor --------
+    # Chefe do setor
     chefe_setor_nome = None
     chefe_setor_funcao = None
     if funcionario.setor_id:
@@ -346,36 +325,24 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
             chefe_setor_nome = chefe.nome
             chefe_setor_funcao = chefe.funcao
 
-    # -------- Cabeçalhos institucionais --------
-    setor = getattr(funcionario, "setor", None)
-    dep = getattr(setor, "departamento", None) if setor else None
+    # Cabeçalhos
+    header_prefeitura = getattr(prefeitura_obj, "nome", None)
+    header_secretaria = getattr(secretaria_obj, "nome", None)
+    header_orgao      = getattr(orgao, "nome", None)
+    header_setor      = getattr(setor, "nome", None)
 
-    # setor pode ter secretaria_oficial ou secretaria (legado)
-    secretaria_obj = (getattr(setor, "secretaria_oficial", None) or
-                      getattr(setor, "secretaria", None))
-    prefeitura_obj = ((getattr(setor, "prefeitura", None) if setor else None) or
-                      (getattr(dep, "prefeitura", None) if dep else None) or
-                      (getattr(secretaria_obj, "prefeitura", None) if secretaria_obj else None))
+    # LOGOS
+    logo_orgao      = _safe_logo_url(orgao, 'logo')            # centro
+    logo_prefeitura = _safe_logo_url(prefeitura_obj, 'logo')   # lateral
+    logo_secretaria = _safe_logo_url(secretaria_obj, 'logo')   # lateral
 
-    header_prefeitura   = getattr(prefeitura_obj, "nome", None)
-    header_secretaria   = getattr(secretaria_obj, "nome", None)
-    header_departamento = getattr(dep, "nome", None)
-    header_setor        = getattr(setor, "nome", None)
-
-    # -------- LOGOS --------
-    # Centro (Órgão): sua regra é usar a logo da Escola
-    logo_orgao = _safe_logo_url(escola, 'logo')
-    # Prefeitura/Secretaria: usa se os modelos tiverem campo 'logo'; se não tiverem, fica None
-    logo_prefeitura = _safe_logo_url(prefeitura_obj, 'logo')
-    logo_secretaria = _safe_logo_url(secretaria_obj, 'logo')
-
-    # -------- Datas / calendário --------
+    # Datas / calendário
     total_dias = monthrange(ano, mes)[1]
     datas_do_mes = [date(ano, mes, d) for d in range(1, total_dias + 1)]
     primeiro_dia_mes = date(ano, mes, 1)
     ultimo_dia_mes = date(ano, mes, total_dias)
 
-    # -------- Feriados / Sábados letivos / Horários --------
+    # Feriados / Sábados letivos / Horários
     feriados = Feriado.objects.filter(data__month=mes, data__year=ano)
     feriados_dict = {f.data: f.descricao for f in feriados}
 
@@ -386,7 +353,7 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
     horario_manha = horarios.filter(turno__iexact='Manhã').first()
     horario_tarde = horarios.filter(turno__iexact='Tarde').first()
 
-    # -------- Recessos (cruzando o mês) --------
+    # Recessos
     recessos_qs = RecessoFuncionario.objects.filter(
         funcionario=funcionario,
         data_inicio__lte=ultimo_dia_mes,
@@ -401,7 +368,7 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
             recesso_por_dia[d] = (r.motivo or "Recesso")
             d += timedelta(days=1)
 
-    # -------- Monta 'dias' (todos os dias do mês) --------
+    # Monta dias
     dias = []
     for data_atual in datas_do_mes:
         dia_semana = dias_da_semana_pt[data_atual.weekday()]
@@ -432,7 +399,7 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
                 'feriado': False
             })
 
-    # -------- Planejamento (segundas) --------
+    # Planejamento (segundas)
     planejamento = []
     if (funcionario.funcao or "").lower() == "professor(a)" and funcionario.tem_planejamento:
         for d in datas_do_mes:
@@ -450,13 +417,18 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
         'mes': mes,
         'ano': ano,
         'nome_mes': meses_pt[mes],
-        'escola': escola,
 
+        # hierarquia/headers
         'header_prefeitura': header_prefeitura,
         'header_secretaria': header_secretaria,
-        'header_departamento': header_departamento,
+        'header_orgao': header_orgao,
         'header_setor': header_setor,
 
+        # compat legada (se template ainda usa):
+        'header_departamento': header_orgao,
+        'escola': None,
+
+        # chefe
         'chefe_setor_nome': chefe_setor_nome,
         'chefe_setor_funcao': chefe_setor_funcao,
         'ultimo_dia_mes': ultimo_dia_mes,
@@ -478,11 +450,13 @@ def gerar_folha_frequencia(request, funcionario_id, mes, ano):
 
     return HttpResponse(html_renderizado)
 
+# =====================================================================
+# Folhas em lote
+# =====================================================================
 
 @login_required
 def gerar_folhas_em_lote(request):
     if request.method != 'POST':
-        # GET: mostra a página “em lote” vazia
         return render(request, 'controle/folhas_em_lote.html', {'folhas': []})
 
     ids_funcionarios = request.POST.getlist('funcionarios')
@@ -511,47 +485,31 @@ def gerar_folhas_em_lote(request):
 
     barrados = [pk for pk in ids_funcionarios if str(pk) not in mapa_nomes]
     if barrados:
-        messages.warning(
-            request,
-            f"{len(barrados)} funcionário(s) fora do seu escopo foram ignorados."
-        )
+        messages.warning(request, f"{len(barrados)} funcionário(s) fora do seu escopo foram ignorados.")
 
-    ids_funcionarios_ordenados = sorted(
-        permitidos, key=lambda pk: mapa_nomes.get(str(pk), '').casefold()
-    )
-
+    ids_funcionarios_ordenados = sorted(permitidos, key=lambda pk: mapa_nomes.get(str(pk), '').casefold())
     folhas_renderizadas = []
 
     for id_func in ids_funcionarios_ordenados:
         funcionario = get_object_or_404(Funcionario, id=id_func)
 
-        # ====== Hierarquia/cabeçalho ======
+        # Hierarquia resolvida
         setor = getattr(funcionario, "setor", None)
-        dep = getattr(setor, "departamento", None) if setor else None
+        orgao = getattr(setor, "orgao", None) if setor else None
+        secretaria = setor.secretaria_resolvida if setor else None
+        prefeitura = setor.prefeitura_resolvida if setor else None
 
-        secretaria = ((getattr(setor, "secretaria_oficial", None) if setor else None) or
-                      (getattr(dep, "secretaria", None) if dep else None) or
-                      (getattr(setor, "secretaria", None) if setor else None))
-        prefeitura = ((getattr(setor, "prefeitura", None) if setor else None) or
-                      (getattr(dep, "prefeitura", None) if dep else None) or
-                      (getattr(secretaria, "prefeitura", None) if secretaria else None))
-        escola_vinculada = ((getattr(setor, "escola", None) if setor else None) or
-                            (getattr(dep, "escola", None) if dep else None))
-        escola = escola_vinculada or Escola.objects.first()
-
-        # ====== Chefia ======
-        chefe = Funcionario.objects.filter(
-            setor=funcionario.setor, is_chefe_setor=True
-        ).only("nome", "funcao").first()
+        # Chefia
+        chefe = Funcionario.objects.filter(setor=funcionario.setor, is_chefe_setor=True).only("nome", "funcao").first()
         chefe_nome = chefe.nome if chefe else None
         chefe_funcao = chefe.funcao if chefe else None
 
-        # ====== LOGOS ======
-        logo_orgao = _safe_logo_url(escola, 'logo')                # Centro: Escola
-        logo_prefeitura = _safe_logo_url(prefeitura, 'logo')       # Se existir no modelo
-        logo_secretaria = _safe_logo_url(secretaria, 'logo')       # Se existir no modelo
+        # LOGOS
+        logo_orgao      = _safe_logo_url(orgao, 'logo')
+        logo_prefeitura = _safe_logo_url(prefeitura, 'logo')
+        logo_secretaria = _safe_logo_url(secretaria, 'logo')
 
-        # ====== Datas ======
+        # Datas
         total_dias = monthrange(ano, mes)[1]
         datas_do_mes = [date(ano, mes, dia) for dia in range(1, total_dias + 1)]
         primeiro_dia_mes = date(ano, mes, 1)
@@ -567,7 +525,7 @@ def gerar_folhas_em_lote(request):
         horario_manha = horarios.filter(turno__iexact='Manhã').first()
         horario_tarde = horarios.filter(turno__iexact='Tarde').first()
 
-        # ====== Recessos ======
+        # Recessos
         recessos_qs = RecessoFuncionario.objects.filter(
             funcionario=funcionario,
             data_inicio__lte=ultimo_dia_mes,
@@ -582,7 +540,7 @@ def gerar_folhas_em_lote(request):
                 recesso_por_dia[d] = (r.motivo or "Recesso")
                 d += timedelta(days=1)
 
-        # ====== Dias ======
+        # Dias
         dias = []
         for data_atual in datas_do_mes:
             dia_semana = dias_da_semana_pt[data_atual.weekday()]
@@ -612,7 +570,7 @@ def gerar_folhas_em_lote(request):
                     'feriado': False
                 })
 
-        # ====== Planejamento ======
+        # Planejamento
         planejamento = []
         if (funcionario.funcao or "").lower() == "professor(a)" and funcionario.tem_planejamento:
             for d in datas_do_mes:
@@ -623,7 +581,6 @@ def gerar_folhas_em_lote(request):
                         'horario': funcionario.horario_planejamento
                     })
 
-        # ====== Contexto ======
         context = {
             'funcionario': funcionario,
             'dias': dias,
@@ -633,16 +590,19 @@ def gerar_folhas_em_lote(request):
             'nome_mes': meses_pt[mes],
             'ultimo_dia_mes': ultimo_dia_mes,
 
-            'escola': escola,
+            # headers
             'header_prefeitura': getattr(prefeitura, "nome", "") if prefeitura else "",
             'header_secretaria': getattr(secretaria, "nome", "") if secretaria else "",
-            'header_departamento': getattr(dep, "nome", "") if dep else "",
+            'header_orgao': getattr(orgao, "nome", "") if orgao else "",
             'header_setor': getattr(setor, "nome", "") if setor else "",
+
+            # compat
+            'header_departamento': getattr(orgao, "nome", "") if orgao else "",
+            'escola': None,
 
             'chefe_setor_nome': chefe_nome,
             'chefe_setor_funcao': chefe_funcao,
 
-            # logos para a faixa superior
             'logo_prefeitura': logo_prefeitura,
             'logo_secretaria': logo_secretaria,
             'logo_orgao': logo_orgao,
@@ -658,164 +618,149 @@ def gerar_folhas_em_lote(request):
 
     return render(request, 'controle/folhas_em_lote.html', {'folhas': folhas_renderizadas})
 
-
 # =====================================================================
 # Selecionar funcionários para gerar
 # =====================================================================
 
-from django.db.models import Q
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import HttpResponseRedirect
-from django.urls import reverse
-
-from .models import (
-    Prefeitura, Secretaria, Escola, Departamento, Setor, Funcionario
-)
-from .permissions import (
-    filter_setores_by_scope,
-    filter_funcionarios_by_scope,
-    assert_can_access_funcionario,
-    deny_and_redirect,
-)
-
 @login_required
 def selecionar_funcionarios(request):
-    # -------------------------------
-    # Meses para o select do template
-    # -------------------------------
+    # Meses p/ select
     meses = [
         (1, "Janeiro"), (2, "Fevereiro"), (3, "Março"), (4, "Abril"),
         (5, "Maio"), (6, "Junho"), (7, "Julho"), (8, "Agosto"),
         (9, "Setembro"), (10, "Outubro"), (11, "Novembro"), (12, "Dezembro")
     ]
 
-    # -------------------------------
-    # Leitura dos filtros (GET/POST)
-    # -------------------------------
-    prefeitura_id   = request.GET.get('prefeitura')   or request.POST.get('prefeitura')   or ""
-    secretaria_id   = request.GET.get('secretaria')   or request.POST.get('secretaria')   or ""
-    orgao_id        = request.GET.get('orgao')        or request.POST.get('orgao')        or ""  # Escola/Unidade
-    departamento_id = request.GET.get('departamento') or request.POST.get('departamento') or ""
-    setor_id        = request.GET.get('setor')        or request.POST.get('setor')        or ""
+    # Filtros (GET/POST)
+    prefeitura_id = request.GET.get('prefeitura') or request.POST.get('prefeitura') or ""
+    secretaria_id = request.GET.get('secretaria') or request.POST.get('secretaria') or ""
+    orgao_id      = request.GET.get('orgao')      or request.POST.get('orgao')      or ""
+    setor_id      = request.GET.get('setor')      or request.POST.get('setor')      or ""
 
-    # ------------------------------------------
-    # Prefeituras/Secretarias do escopo (leitura)
-    # ------------------------------------------
-    if request.user.is_superuser or request.user.is_staff:
+    user = request.user
+    is_admin = bool(user.is_superuser or user.is_staff)
+
+    # ---------------------------
+    # Listas de seleção no topo
+    # ---------------------------
+    if is_admin:
         prefeituras_qs = Prefeitura.objects.all()
-        secretarias_qs = Secretaria.objects.all()
+        secretarias_qs = Secretaria.objects.select_related("prefeitura").all()
+        # Órgãos: se usuário filtrou secretaria, mostra só os dela; senão, todos
+        orgaos_qs = (
+            Orgao.objects.select_related("secretaria", "secretaria__prefeitura")
+            .filter(secretaria_id=secretaria_id) if secretaria_id else
+            Orgao.objects.select_related("secretaria", "secretaria__prefeitura").all()
+        )
     else:
-        secretarias_qs = Secretaria.objects.filter(
-            Q(acessos__user=request.user) | Q(scopes__user=request.user)
-        ).distinct()
+        # Secretarias no escopo (UserScope + legado)
+        secretarias_qs = (
+            Secretaria.objects.select_related("prefeitura")
+            .filter(
+                Q(acessos_secretaria__user=user) | Q(scopes__user=user)
+            )
+            .distinct()
+        )
 
-        prefeituras_qs = Prefeitura.objects.filter(
-            Q(acessos_prefeitura__user=request.user) |
-            Q(scopes__user=request.user) |
-            Q(secretarias__in=secretarias_qs)
-        ).distinct()
+        # Prefeituras no escopo (UserScope + legado + prefeituras que possuem secretarias no escopo)
+        prefeituras_qs = (
+            Prefeitura.objects
+            .filter(
+                Q(acessos_prefeitura__user=user) |
+                Q(scopes__user=user) |
+                Q(secretarias__in=secretarias_qs)
+            )
+            .distinct()
+        )
 
-    # ------------------------------------------
-    # Órgãos/Unidades (Escolas) sob a Secretaria
-    # ------------------------------------------
-    if secretaria_id:
-        escolas_qs = Escola.objects.filter(secretaria_id=secretaria_id)
-    else:
-        escolas_qs = Escola.objects.none()
+        # Órgãos no escopo:
+        # - Se houver secretaria selecionada, mostrar os dela
+        # - Senão, todos os órgãos:
+        #     • com AcessoOrgao / UserScope para o usuário
+        #     • OU pertencentes a secretarias do escopo
+        #     • OU pertencentes a prefeituras do escopo
+        if secretaria_id:
+            orgaos_qs = Orgao.objects.select_related("secretaria", "secretaria__prefeitura").filter(secretaria_id=secretaria_id)
+        else:
+            orgaos_qs = (
+                Orgao.objects.select_related("secretaria", "secretaria__prefeitura")
+                .filter(
+                    Q(acessos_orgao__user=user) |
+                    Q(scopes__user=user) |
+                    Q(secretaria__in=secretarias_qs) |
+                    Q(secretaria__prefeitura__in=prefeituras_qs)
+                )
+                .distinct()
+            )
 
-    # ------------------------------------------------------
-    # Departamentos dependem da prefeitura/secretaria/órgão
-    # ------------------------------------------------------
+    # ---------------------------
+    # Setores visíveis (escopo)
+    # ---------------------------
+    setores_qs = filter_setores_by_scope(
+        Setor.objects.select_related(
+            "prefeitura", "secretaria", "orgao", "orgao__secretaria", "orgao__secretaria__prefeitura"
+        ),
+        user,
+    )
+
+    # Filtros opcionais (cascata apenas como filtro, não como bloqueio)
     if orgao_id:
-        departamentos_qs = Departamento.objects.filter(escola_id=orgao_id)
-    elif secretaria_id:
-        departamentos_qs = Departamento.objects.filter(secretaria_id=secretaria_id)
-    elif prefeitura_id:
-        departamentos_qs = Departamento.objects.filter(prefeitura_id=prefeitura_id)
-    else:
-        departamentos_qs = (
-            Departamento.objects.filter(secretaria__in=secretarias_qs) |
-            Departamento.objects.filter(prefeitura__in=prefeituras_qs)
-        )
-
-    # ------------------------------------------------------
-    # Setores = leitura (escopo) + filtros da cascata
-    # ------------------------------------------------------
-    setores_qs = filter_setores_by_scope(Setor.objects.all(), request.user)
-
-    if departamento_id:
-        setores_qs = setores_qs.filter(departamento_id=departamento_id)
-    elif orgao_id:
-        setores_qs = setores_qs.filter(departamento__escola_id=orgao_id)
-    elif secretaria_id:
+        setores_qs = setores_qs.filter(orgao_id=orgao_id)
+    if secretaria_id:
         setores_qs = setores_qs.filter(
-            Q(departamento__secretaria_id=secretaria_id) | Q(secretaria_id=secretaria_id)
+            Q(secretaria_id=secretaria_id) | Q(orgao__secretaria_id=secretaria_id)
         )
-    elif prefeitura_id:
+    if prefeitura_id:
         setores_qs = setores_qs.filter(
-            Q(departamento__prefeitura_id=prefeitura_id) | Q(secretaria__prefeitura_id=prefeitura_id)
+            Q(prefeitura_id=prefeitura_id) |
+            Q(secretaria__prefeitura_id=prefeitura_id) |
+            Q(orgao__secretaria__prefeitura_id=prefeitura_id)
         )
 
     setores_qs = setores_qs.order_by('nome')
 
-    # ------------------------------------------------------
-    # ONDE O USUÁRIO TEM GERÊNCIA (para GERAR folhas)
-    # ------------------------------------------------------
-    setores_gerenciaveis = setores_qs.filter(
-        Q(scopes__user=request.user, scopes__nivel='GERENCIA') |
-        Q(departamento__scopes__user=request.user, departamento__scopes__nivel='GERENCIA') |
-        Q(departamento__secretaria__scopes__user=request.user, departamento__secretaria__scopes__nivel='GERENCIA') |
-        Q(departamento__prefeitura__scopes__user=request.user, departamento__prefeitura__scopes__nivel='GERENCIA') |
-        Q(secretaria__scopes__user=request.user, secretaria__scopes__nivel='GERENCIA') |
-        Q(secretaria__prefeitura__scopes__user=request.user, secretaria__prefeitura__scopes__nivel='GERENCIA') |
-        # legado (nível GERENCIA)
-        Q(secretaria__acessos__user=request.user, secretaria__acessos__nivel='GERENCIA') |
-        Q(departamento__secretaria__acessos__user=request.user, departamento__secretaria__acessos__nivel='GERENCIA') |
-        Q(departamento__prefeitura__acessos_prefeitura__user=request.user, departamento__prefeitura__acessos_prefeitura__nivel='GERENCIA') |
-        Q(secretaria__prefeitura__acessos_prefeitura__user=request.user, secretaria__prefeitura__acessos_prefeitura__nivel='GERENCIA')
-    ).distinct()
+    # ---------------------------
+    # Setores GERENCIÁVEIS (para gerar)
+    # ---------------------------
+    if is_admin:
+        setores_gerenciaveis = setores_qs  # admin pode tudo
+    else:
+        setores_gerenciaveis = setores_qs.filter(
+            Q(scopes__user=user, scopes__nivel='GERENCIA') |
+            Q(orgao__scopes__user=user, orgao__scopes__nivel='GERENCIA') |
+            Q(secretaria__scopes__user=user, secretaria__scopes__nivel='GERENCIA') |
+            Q(prefeitura__scopes__user=user, prefeitura__scopes__nivel='GERENCIA') |
+            # legado (nível GERENCIA)
+            Q(secretaria__acessos_secretaria__user=user, secretaria__acessos_secretaria__nivel='GERENCIA') |
+            Q(prefeitura__acessos_prefeitura__user=user, prefeitura__acessos_prefeitura__nivel='GERENCIA') |
+            Q(orgao__acessos_orgao__user=user, orgao__acessos_orgao__nivel='GERENCIA')
+        ).distinct()
 
-    # ------------------------------------------------------
-    # IDs das unidades que têm ao menos um setor gerenciável
-    # ------------------------------------------------------
-    prefeituras_gerenciaveis_ids   = set()
-    secretarias_gerenciaveis_ids   = set()
-    escolas_gerenciaveis_ids       = set()
-    departamentos_gerenciaveis_ids = set()
-
+    # IDs agregados (úteis para destacar o que tem gerência)
+    prefeituras_gerenciaveis_ids, secretarias_gerenciaveis_ids, orgaos_gerenciaveis_ids = set(), set(), set()
     for s in setores_gerenciaveis:
-        dep = getattr(s, "departamento", None)
-        if dep:
-            departamentos_gerenciaveis_ids.add(dep.id)
-            if dep.prefeitura_id:
-                prefeituras_gerenciaveis_ids.add(dep.prefeitura_id)
-            if dep.secretaria_id:
-                secretarias_gerenciaveis_ids.add(dep.secretaria_id)
-            if dep.escola_id:
-                escolas_gerenciaveis_ids.add(dep.escola_id)
+        if s.prefeitura_id:
+            prefeituras_gerenciaveis_ids.add(s.prefeitura_id)
+        sec_res = s.secretaria_resolvida
+        if sec_res:
+            secretarias_gerenciaveis_ids.add(sec_res.id)
+            if sec_res.prefeitura_id:
+                prefeituras_gerenciaveis_ids.add(sec_res.prefeitura_id)
+        if s.orgao_id:
+            orgaos_gerenciaveis_ids.add(s.orgao_id)
 
-        if getattr(s, "secretaria_id", None):
-            secretarias_gerenciaveis_ids.add(s.secretaria_id)
-            sec = getattr(s, "secretaria", None)
-            if sec and sec.prefeitura_id:
-                prefeituras_gerenciaveis_ids.add(sec.prefeitura_id)
-
-    # ------------------------------------------------------
-    # Setor atual e flag de GERÊNCIA para liberar geração
-    # ------------------------------------------------------
+    # Setor atual + pode gerenciar?
     setor_atual = setores_qs.filter(id=setor_id).first() if setor_id else None
     pode_gerenciar_setor_selecionado = bool(
-        request.user.is_superuser or request.user.is_staff or
-        (setor_atual and setores_gerenciaveis.filter(id=setor_atual.id).exists())
+        is_admin or (setor_atual and setores_gerenciaveis.filter(id=setor_atual.id).exists())
     )
 
-    # ------------------------------------------------------
-    # POST: validar e redirecionar para a folha do primeiro selecionado
-    # ------------------------------------------------------
+    # ---------------------------
+    # POST → abrir primeira folha
+    # ---------------------------
     if request.method == 'POST':
         if setor_id and not setores_qs.filter(id=setor_id).exists():
-            return deny_and_redirect(request, "Sem permissão para esse setor.", to='controle:painel_controle')
+            return deny_and_redirect(request, "Sem permissão para esse setor.", to_name='controle:painel_controle')
 
         ids_funcionarios = request.POST.getlist('funcionarios')
         mes_str = request.POST.get('mes')
@@ -829,52 +774,50 @@ def selecionar_funcionarios(request):
 
         if ids_funcionarios and mes and ano:
             f = get_object_or_404(Funcionario, id=ids_funcionarios[0])
-            if not assert_can_access_funcionario(request.user, f):
-                return deny_and_redirect(request, "Sem permissão para este servidor.", to='controle:painel_controle')
-            # 👉 NAMESPACE AQUI
+            if not assert_can_access_funcionario(user, f):
+                return deny_and_redirect(request, "Sem permissão para este servidor.", to_name='controle:painel_controle')
             return HttpResponseRedirect(reverse('controle:folha_frequencia', args=[f.id, mes, ano]))
 
-    # ------------------------------------------------------
-    # GET: carregar lista de funcionários quando houver setor
-    # ------------------------------------------------------
+    # ---------------------------
+    # GET → carregar funcionários do setor selecionado (se houver)
+    # ---------------------------
     funcionarios = []
     if request.method == 'GET' and setor_id:
         if not setores_qs.filter(id=setor_id).exists():
-            return deny_and_redirect(request, "Sem permissão para esse setor.", to='controle:painel_controle')
+            return deny_and_redirect(request, "Sem permissão para esse setor.", to_name='controle:painel_controle')
         funcionarios = filter_funcionarios_by_scope(
             Funcionario.objects.filter(setor_id=setor_id),
-            request.user
+            user
         ).order_by('nome')
 
-    # ------------------------------------------------------
-    # Contexto para o template com cascata + seleções atuais
-    # ------------------------------------------------------
     context = {
+        # Combos (só aparecem no template se tiverem itens)
         'prefeituras': prefeituras_qs.order_by('nome'),
         'secretarias': secretarias_qs.order_by('nome'),
-        'escolas': escolas_qs.order_by('nome_escola'),
-        'departamentos': departamentos_qs.order_by('nome'),
+        'orgaos': orgaos_qs.order_by('nome'),
+
+        # Setores
         'setores': setores_qs,
         'setores_gerenciaveis': setores_gerenciaveis,
 
+        # Seleções
         'prefeitura_id': prefeitura_id,
         'secretaria_id': secretaria_id,
         'orgao_id': orgao_id,
-        'departamento_id': departamento_id,
         'setor_id': setor_id,
 
+        # Auxiliares para destacar o que tem gerência
         'prefeituras_gerenciaveis_ids': list(prefeituras_gerenciaveis_ids),
         'secretarias_gerenciaveis_ids': list(secretarias_gerenciaveis_ids),
-        'escolas_gerenciaveis_ids': list(escolas_gerenciaveis_ids),
-        'departamentos_gerenciaveis_ids': list(departamentos_gerenciaveis_ids),
+        'orgaos_gerenciaveis_ids': list(orgaos_gerenciaveis_ids),
 
+        # Lista e meta
         'funcionarios': funcionarios,
         'meses': meses,
         'setor_atual': setor_atual,
         'pode_gerenciar_setor_selecionado': pode_gerenciar_setor_selecionado,
     }
     return render(request, 'controle/selecionar_funcionarios.html', context)
-
 
 # =====================================================================
 # Listagem / Visualização de folhas
@@ -915,7 +858,6 @@ def cadastrar_funcionario(request):
     if request.method == 'POST':
         form = FuncionarioForm(request.POST, request.FILES)
         if form.is_valid():
-            # opcional: validar se setor escolhido está no escopo do usuário
             setor = form.cleaned_data.get("setor")
             if setor:
                 if not filter_setores_by_scope(Setor.objects.filter(id=setor.id), request.user).exists():
@@ -958,10 +900,7 @@ def editar_funcionario(request, funcionario_id):
     else:
         form = FuncionarioForm(instance=funcionario)
 
-    return render(request, 'controle/editar_funcionario.html', {
-        'form': form,
-        'funcionario': funcionario
-    })
+    return render(request, 'controle/editar_funcionario.html', {'form': form, 'funcionario': funcionario})
 
 @login_required
 def excluir_funcionario(request, id):
@@ -1010,10 +949,7 @@ def editar_horario(request, funcionario_id):
     else:
         form = HorarioTrabalhoForm(instance=horario)
 
-    return render(request, 'controle/editar_horario.html', {
-        'form': form,
-        'funcionario': funcionario
-    })
+    return render(request, 'controle/editar_horario.html', {'form': form, 'funcionario': funcionario})
 
 # =====================================================================
 # Feriados
@@ -1031,10 +967,7 @@ def cadastrar_feriado(request):
     else:
         form = FeriadoForm()
 
-    return render(request, 'controle/cadastrar_feriado.html', {
-        'form': form,
-        'feriados': feriados
-    })
+    return render(request, 'controle/cadastrar_feriado.html', {'form': form, 'feriados': feriados})
 
 @login_required
 def editar_feriado(request, feriado_id):
@@ -1067,11 +1000,10 @@ def painel_controle(request):
 
     funcionarios_count = filter_funcionarios_by_scope(Funcionario.objects.all(), request.user).count()
     horarios_count = filter_horarios_by_scope(HorarioTrabalho.objects.all(), request.user).count()
-    feriados_count = Feriado.objects.count()  # geral (ajuste se quiser por prefeitura)
+    feriados_count = Feriado.objects.count()
 
     cutoff = agora - timedelta(days=30)
     folhas_qs = filter_folhas_by_scope(FolhaFrequencia.objects.all(), request.user)
-    # se tiver data_geracao, filtra últimos 30d
     if 'data_geracao' in {f.name for f in FolhaFrequencia._meta.get_fields()}:
         folhas_qs = folhas_qs.filter(data_geracao__gte=cutoff)
     folhas_30d_q = folhas_qs.count()
@@ -1124,11 +1056,9 @@ def importar_funcionarios(request):
             for _, row in df.iterrows():
                 setor_nome = str(row.get('Setor')).strip()
                 setor_qs = Setor.objects.filter(nome=setor_nome)
-
-                # restringe setor ao escopo do usuário
                 setor = filter_setores_by_scope(setor_qs, request.user).first()
                 if not setor:
-                    continue  # ignora se o setor não existir ou não estiver no escopo
+                    continue  # ignora se não existir/no escopo
 
                 funcionario_data = {
                     'nome': str(row.get('Nome', '')).strip(),
@@ -1212,8 +1142,7 @@ def capas_livro_ponto(request):
     ano = int(request.GET.get('ano'))
     mes = int(request.GET.get('mes'))
 
-    escola = Escola.objects.first()
-
+    # Locale PT-BR
     try:
         locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
     except locale.Error:
@@ -1224,11 +1153,16 @@ def capas_livro_ponto(request):
 
     nome_mes = date(ano, mes, 1).strftime('%B').capitalize()
 
-    # checa se setor está no escopo
+    # Checa escopo do setor
+    prefeitura_ctx = None
     if setor_nome:
         setor_qs = filter_setores_by_scope(Setor.objects.filter(nome=setor_nome), request.user)
         if not setor_qs.exists():
             return deny_and_redirect(request, "Sem permissão para este setor.")
+        setor_obj = setor_qs.first()
+        prefeitura_ctx = setor_obj.prefeitura_resolvida
+    if not prefeitura_ctx:
+        prefeitura_ctx = Prefeitura.objects.first()
 
     paginas = filter_folhas_by_scope(
         FolhaFrequencia.objects.filter(
@@ -1242,7 +1176,6 @@ def capas_livro_ponto(request):
     ultimo_dia = date(ano, mes, calendar.monthrange(ano, mes)[1])
 
     context = {
-        'escola': escola,
         'setor': (setor_nome or '').upper(),
         'ano': ano,
         'mes': mes,
@@ -1250,8 +1183,10 @@ def capas_livro_ponto(request):
         'paginas': paginas,
         'data_abertura': primeiro_dia.strftime('%d de %B de %Y'),
         'data_encerramento': ultimo_dia.strftime('%d de %B de %Y'),
-        'cidade': escola.cidade if escola else '',
-        'uf': escola.uf if escola else '',
+        'cidade': getattr(prefeitura_ctx, 'cidade', '') or '',
+        'uf': getattr(prefeitura_ctx, 'uf', '') or '',
+        # compat
+        'escola': None,
     }
     return render(request, 'controle/capas_livro_ponto.html', context)
 
@@ -1259,11 +1194,7 @@ def capas_livro_ponto(request):
 def selecionar_setor_capa(request):
     setores = filter_setores_by_scope(Setor.objects.all(), request.user).order_by('nome')
     hoje = date.today()
-    context = {
-        'setores': setores,
-        'ano': hoje.year,
-        'mes': hoje.month
-    }
+    context = {'setores': setores, 'ano': hoje.year, 'mes': hoje.month}
     return render(request, 'controle/selecionar_capa.html', context)
 
 # =====================================================================
@@ -1276,11 +1207,12 @@ def ficha_funcionario(request, funcionario_id):
     if not assert_can_access_funcionario(request.user, funcionario):
         return deny_and_redirect(request, "Sem permissão para visualizar esta ficha.")
     dias_semana = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
-    escola = Escola.objects.first()
+    orgao = getattr(funcionario.setor, "orgao", None) if funcionario.setor_id else None
     return render(request, 'controle/ficha_funcionario.html', {
         'funcionario': funcionario,
         'dias_semana': dias_semana,
-        'escola': escola,
+        'orgao': orgao,
+        'escola': None,  # compat
     })
 
 # =====================================================================
@@ -1291,11 +1223,11 @@ def ficha_funcionario(request, funcionario_id):
 def relatorio_personalizado_funcionarios(request):
     funcionarios = filter_funcionarios_by_scope(Funcionario.objects.all(), request.user)
 
-    # Filtros aplicados via checkboxes
-    filtro_serie = request.POST.getlist('filtro_serie')
-    filtro_turma = request.POST.getlist('filtro_turma')
-    filtro_turno = request.POST.getlist('filtro_turno')
-    filtro_setor = request.POST.getlist('filtro_setor')
+    # Filtros
+    filtro_serie   = request.POST.getlist('filtro_serie')
+    filtro_turma   = request.POST.getlist('filtro_turma')
+    filtro_turno   = request.POST.getlist('filtro_turno')
+    filtro_setor   = request.POST.getlist('filtro_setor')
     filtro_vinculo = request.POST.getlist('filtro_vinculo')
 
     if filtro_serie:
@@ -1347,21 +1279,17 @@ def relatorio_personalizado_funcionarios(request):
 
     campos_selecionados = request.POST.getlist('campos') if request.method == 'POST' else []
 
-    # valores únicos restritos ao escopo
     base_f = filter_funcionarios_by_scope(Funcionario.objects.all(), request.user)
-    series = base_f.exclude(serie__isnull=True).exclude(serie__exact='').values_list('serie', flat=True).distinct()
-    turmas = base_f.exclude(turma__isnull=True).exclude(turma__exact='').values_list('turma', flat=True).distinct()
-    turnos = base_f.exclude(turno__isnull=True).exclude(turno__exact='').values_list('turno', flat=True).distinct()
+    series  = base_f.exclude(serie__isnull=True).exclude(serie__exact='').values_list('serie', flat=True).distinct()
+    turmas  = base_f.exclude(turma__isnull=True).exclude(turma__exact='').values_list('turma', flat=True).distinct()
+    turnos  = base_f.exclude(turno__isnull=True).exclude(turno__exact='').values_list('turno', flat=True).distinct()
     setores = filter_setores_by_scope(Setor.objects.all(), request.user)
     vinculos = base_f.exclude(tipo_vinculo__isnull=True).exclude(tipo_vinculo__exact='').values_list('tipo_vinculo', flat=True).distinct()
-
-    escola = Escola.objects.first()
 
     return render(request, 'controle/relatorio_personalizado_funcionarios.html', {
         'funcionarios': funcionarios,
         'campos_disponiveis': campos_disponiveis,
         'campos_selecionados': campos_selecionados,
-        'escola': escola,
         'series': series,
         'turmas': turmas,
         'turnos': turnos,
@@ -1372,6 +1300,8 @@ def relatorio_personalizado_funcionarios(request):
         'filtro_turno': filtro_turno,
         'filtro_setor': filtro_setor,
         'filtro_vinculo': filtro_vinculo,
+        # compat
+        'escola': None,
     })
 
 @login_required
@@ -1415,10 +1345,7 @@ def relatorio_professores(request):
         ('vinculo', 'Tipo de Vínculo'),
     ]
 
-    escola = Escola.objects.first() if Escola.objects.exists() else None
-
     contexto = {
-        'escola': escola,
         'series': series,
         'turmas': turmas,
         'turnos': turnos,
@@ -1430,6 +1357,7 @@ def relatorio_professores(request):
         'campos_disponiveis': campos_disponiveis,
         'campos_selecionados': campos_selecionados,
         'funcionarios': funcionarios,
+        'escola': None,  # compat
     }
     return render(request, 'controle/relatorio_professores.html', contexto)
 
@@ -1452,7 +1380,6 @@ def gerar_folhas_multimes_funcionario(request):
             ano = form.cleaned_data['ano']
             meses = list(map(int, form.cleaned_data['meses']))
 
-            # checa permissão do servidor escolhido
             if not assert_can_access_funcionario(request.user, funcionario):
                 return deny_and_redirect(request, "Sem permissão para esse servidor.")
 
@@ -1470,20 +1397,19 @@ def gerar_folhas_multimes_funcionario(request):
 
 @login_required
 def excluir_folha(request, folha_id):
-    # carrega a folha e o servidor vinculado para checar permissão
     folha = get_object_or_404(
         FolhaFrequencia.objects.select_related('funcionario', 'funcionario__setor'),
         id=folha_id
     )
-
-    # usa a mesma regra de permissão do restante (permissions.assert_can_access_funcionario)
     if not assert_can_access_funcionario(request.user, folha.funcionario):
         return deny_and_redirect(request, "Sem permissão para excluir esta folha.")
-
     folha.delete()
     messages.success(request, "Folha de frequência excluída com sucesso.")
     return redirect('controle:listar_folhas')
 
+# =====================================================================
+# Recessos em massa e CRUD
+# =====================================================================
 
 @login_required
 @require_http_methods(["GET", "POST"])
@@ -1501,7 +1427,6 @@ def recesso_bulk_create(request):
         criados, pulados = 0, 0
         with transaction.atomic():
             for func in funcionarios:
-                # Evita sobreposição grosseira (se já existe período que cruza com o novo, não duplica)
                 existe = RecessoFuncionario.objects.filter(
                     funcionario=func,
                     data_inicio__lte=df,
@@ -1533,9 +1458,7 @@ def api_funcionarios_por_setor(request):
         qs = Funcionario.objects.filter(setor_id=setor_id).order_by('nome').values('id', 'nome')
     return JsonResponse(list(qs), safe=False)
 
-
 def _tem_recesso_no_dia(funcionario, d):
-    # d é um date (dia do mês sendo renderizado)
     return RecessoFuncionario.objects.filter(
         funcionario=funcionario,
         data_inicio__lte=d,
@@ -1545,52 +1468,28 @@ def _tem_recesso_no_dia(funcionario, d):
 @login_required
 def gerar_folha_funcionario(request, funcionario_id, mes, ano):
     funcionario = get_object_or_404(Funcionario, pk=funcionario_id)
-    # ... sua lógica que cria a lista `dias` com campos .data, .manha, .tarde, etc ...
+    # ... sua montagem de `dias` ...
+    dias = []  # placeholder se você reaproveitar; preencha conforme sua lógica
 
-    # Para cada dia, se estiver dentro de algum recesso do funcionário, marque descrição "Recesso"
     for dia in dias:
         d = dia.data  # datetime.date
         if _tem_recesso_no_dia(funcionario, d):
             dia.descricao = "Recesso"
-            # opcional: dia.feriado = False; dia.sabado_letivo = False
 
-    context = {
-        'funcionario': funcionario,
-        'dias': dias,
-        # ... demais variáveis que você já passa ...
-    }
+    context = {'funcionario': funcionario, 'dias': dias}
     return render(request, 'controle/folha_frequencia.html', context)
-
-# =====================================================================
-# Recessos: listar / editar / excluir
-# =====================================================================
-from django.core.paginator import Paginator
-from django.db.models import Q
-from django.contrib import messages
-from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.decorators import login_required
-
-from .models import RecessoFuncionario, Funcionario, Setor
-from .forms import RecessoFuncionarioForm
-from .permissions import (
-    filter_funcionarios_by_scope,
-    filter_setores_by_scope,
-    assert_can_access_funcionario,
-    deny_and_redirect,
-)
 
 @login_required
 def recessos_list(request):
     """
     Lista recessos dos funcionários DENTRO do escopo do usuário.
-    Filtros: nome do funcionário (?nome=), setor (?setor=ID), mês (?mes=), ano (?ano=)
+    Filtros: nome (?nome=), setor (?setor=ID), mês (?mes=), ano (?ano=)
     """
     nome = (request.GET.get("nome") or "").strip()
     setor_id = request.GET.get("setor")
     mes = request.GET.get("mes")
     ano = request.GET.get("ano")
 
-    # Funcionários que o usuário pode ver
     func_qs_scope = filter_funcionarios_by_scope(
         Funcionario.objects.select_related("setor"), request.user
     )
@@ -1605,11 +1504,9 @@ def recessos_list(request):
     if setor_id:
         qs = qs.filter(setor_id=setor_id)
 
-    # filtro por intervalo que cruze o mês/ano informado
     if mes and ano:
         try:
             mes_i, ano_i = int(mes), int(ano)
-            # qualquer recesso que tenha qualquer dia dentro do mês/ano
             qs = qs.filter(
                 data_inicio__year__lte=ano_i,
                 data_fim__year__gte=ano_i
@@ -1637,12 +1534,8 @@ def recessos_list(request):
     }
     return render(request, "controle/recessos_list.html", context)
 
-
 @login_required
 def recesso_edit(request, recesso_id):
-    """
-    Edita um recesso existente, respeitando o escopo do usuário.
-    """
     recesso = get_object_or_404(RecessoFuncionario.objects.select_related("funcionario", "setor"),
                                 pk=recesso_id)
 
@@ -1653,28 +1546,18 @@ def recesso_edit(request, recesso_id):
         form = RecessoFuncionarioForm(request.POST, instance=recesso, user=request.user)
         if form.is_valid():
             obj = form.save(commit=False)
-
-            # se mudar o funcionário, checa permissão de novo
             if not assert_can_access_funcionario(request.user, obj.funcionario):
                 return deny_and_redirect(request, "Sem permissão para vincular a este servidor.")
-
             obj.save()
             messages.success(request, "Recesso atualizado com sucesso.")
             return redirect("controle:recessos_list")
     else:
         form = RecessoFuncionarioForm(instance=recesso, user=request.user)
 
-    return render(request, "controle/recesso_edit.html", {
-        "form": form,
-        "recesso": recesso,
-    })
-
+    return render(request, "controle/recesso_edit.html", {"form": form, "recesso": recesso})
 
 @login_required
 def recesso_delete(request, recesso_id):
-    """
-    Exclui um recesso (GET com confirmação no template).
-    """
     recesso = get_object_or_404(RecessoFuncionario.objects.select_related("funcionario"),
                                 pk=recesso_id)
     if not assert_can_access_funcionario(request.user, recesso.funcionario):
@@ -1684,15 +1567,11 @@ def recesso_delete(request, recesso_id):
     messages.success(request, "Recesso excluído com sucesso.")
     return redirect("controle:recessos_list")
 
-from django.contrib.auth.views import LogoutView
-from django.urls import reverse_lazy
-
+# ---------------------------------------------------------------------
+# Logout com namespace (compat)
+# ---------------------------------------------------------------------
 class PainelLogoutView(LogoutView):
-    # para resolver com namespace
     next_page = reverse_lazy("controle:login")
-    # permitir GET nesta view
     http_method_names = ["get", "post", "options", "head"]
-
     def get(self, request, *args, **kwargs):
-        # reaproveita a lógica do POST
         return self.post(request, *args, **kwargs)

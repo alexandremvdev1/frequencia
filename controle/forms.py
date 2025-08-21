@@ -1,79 +1,67 @@
-from django import forms
-from .models import Funcionario
+# controle/forms.py
+from __future__ import annotations
+
 from datetime import date
+from django import forms
 
+from .models import (
+    Funcionario, HorarioTrabalho, Feriado,
+    RecessoFuncionario, Setor
+)
+from .permissions import (
+    filter_setores_by_scope, filter_funcionarios_by_scope
+)
 
+# ---------------------------
+# Funcionario
+# ---------------------------
 class FuncionarioForm(forms.ModelForm):
     class Meta:
         model = Funcionario
         fields = [
-            'nome',
-            'matricula',
-            'cargo',
-            'funcao',
-            'setor',
-            'turno',
-            'turma',
-            'data_admissao',
-            'data_nascimento',
-            'cpf',
-            'rg',
-            'pis',
-            'titulo_eleitor',
-            'ctps_numero',
-            'ctps_serie',
-            'telefone',
-            'email',
-            'endereco',
-            'numero',
-            'bairro',
-            'cidade',
-            'uf',
-            'cep',
-            'estado_civil',
-            'escolaridade',
-            'tem_planejamento',
-            'horario_planejamento',
-            'sabado_letivo',
+            'nome', 'matricula', 'cargo', 'funcao', 'setor',
+            'turno', 'turma', 'data_admissao', 'data_nascimento',
+            'cpf', 'rg', 'pis', 'titulo_eleitor',
+            'ctps_numero', 'ctps_serie',
+            'telefone', 'email',
+            'endereco', 'numero', 'bairro', 'cidade', 'uf', 'cep',
+            'estado_civil', 'escolaridade',
+            'tem_planejamento', 'horario_planejamento', 'sabado_letivo',
             'foto',
         ]
-
         widgets = {
             'data_admissao': forms.TextInput(attrs={
-                'placeholder': 'dd/mm/aaaa',
-                'class': 'data-input',
-                'autocomplete': 'off',
-                'data-mask': 'date',
+                'placeholder': 'dd/mm/aaaa', 'class': 'data-input',
+                'autocomplete': 'off', 'data-mask': 'date',
             }),
             'data_nascimento': forms.TextInput(attrs={
-                'placeholder': 'dd/mm/aaaa',
-                'class': 'data-input',
-                'autocomplete': 'off',
-                'data-mask': 'date',
+                'placeholder': 'dd/mm/aaaa', 'class': 'data-input',
+                'autocomplete': 'off', 'data-mask': 'date',
             }),
         }
 
     def __init__(self, *args, **kwargs):
-        super(FuncionarioForm, self).__init__(*args, **kwargs)
-
-        # Aceitar entrada no formato brasileiro
+        super().__init__(*args, **kwargs)
+        # aceitar dd/mm/aaaa
         self.fields['data_admissao'].input_formats = ['%d/%m/%Y']
         self.fields['data_nascimento'].input_formats = ['%d/%m/%Y']
 
-        # Mostrar valores já salvos no formato correto ao editar
+        # exibir formatado ao editar
         if self.instance and self.instance.pk:
             if self.instance.data_admissao:
                 self.initial['data_admissao'] = self.instance.data_admissao.strftime('%d/%m/%Y')
             if self.instance.data_nascimento:
                 self.initial['data_nascimento'] = self.instance.data_nascimento.strftime('%d/%m/%Y')
 
-        # Campo opcional inicialmente
+        # obrigatoriedade condicional
         self.fields['horario_planejamento'].required = False
         if self.instance and self.instance.tem_planejamento:
             self.fields['horario_planejamento'].required = True
 
-from .models import HorarioTrabalho
 
+# ---------------------------
+# Horário de trabalho
+# ---------------------------
 class HorarioTrabalhoForm(forms.ModelForm):
     class Meta:
         model = HorarioTrabalho
@@ -83,21 +71,30 @@ class HorarioTrabalhoForm(forms.ModelForm):
             'horario_fim': forms.TimeInput(attrs={'type': 'time'}),
         }
 
-from .models import Feriado
 
+# ---------------------------
+# Feriado
+# ---------------------------
 class FeriadoForm(forms.ModelForm):
     class Meta:
         model = Feriado
-        fields = ['data', 'descricao', 'sabado_letivo']  # Incluindo o campo sabado_letivo
+        fields = ['data', 'descricao', 'sabado_letivo']
         widgets = {
             'data': forms.DateInput(attrs={'type': 'date'}),
-            'sabado_letivo': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),  # Checkbox para sábado letivo
+            'sabado_letivo': forms.CheckboxInput(attrs={'class': 'checkbox-input'}),
         }
 
 
+# ---------------------------
+# Importação simples
+# ---------------------------
 class ImportacaoFuncionarioForm(forms.Form):
     excel_file = forms.FileField(label='Arquivo Excel', required=True)
 
+
+# ---------------------------
+# Folhas individuais (multi-meses)
+# ---------------------------
 MESES_CHOICES = [
     (1, 'Janeiro'), (2, 'Fevereiro'), (3, 'Março'), (4, 'Abril'),
     (5, 'Maio'), (6, 'Junho'), (7, 'Julho'), (8, 'Agosto'),
@@ -105,105 +102,28 @@ MESES_CHOICES = [
 ]
 
 class GerarFolhasIndividuaisForm(forms.Form):
-    funcionario = forms.ModelChoiceField(queryset=Funcionario.objects.all(), label="Funcionário")
+    funcionario = forms.ModelChoiceField(
+        queryset=Funcionario.objects.all(), label="Funcionário"
+    )
     ano = forms.IntegerField(label="Ano", initial=date.today().year)
-    meses = forms.MultipleChoiceField(choices=MESES_CHOICES, widget=forms.CheckboxSelectMultiple, label="Meses")
-
-# controle/admin_forms.py
-from django import forms
-from .models import (
-    Prefeitura, Secretaria, Escola, Setor, NivelAcesso
-)
-
-ESCOPO_CHOICES = [
-    ("prefeitura", "Prefeitura"),
-    ("secretaria", "Secretaria"),
-    ("escola", "Escola / Unidade"),
-    ("setor", "Setor"),
-]
-
-
-class ConcederAcessoForm(forms.Form):
-    escopo = forms.ChoiceField(choices=ESCOPO_CHOICES, label="Escopo")
-    nivel = forms.ChoiceField(choices=NivelAcesso.choices, label="Nível de acesso")
-
-    prefeitura = forms.ModelChoiceField(
-        queryset=Prefeitura.objects.all(), required=False, label="Prefeitura"
+    meses = forms.MultipleChoiceField(
+        choices=MESES_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        label="Meses"
     )
-    secretaria = forms.ModelChoiceField(
-        queryset=Secretaria.objects.select_related("prefeitura"), required=False, label="Secretaria"
-    )
-    escola = forms.ModelChoiceField(
-        queryset=Escola.objects.select_related("secretaria__prefeitura"), required=False, label="Escola/Unidade"
-    )
-    setor = forms.ModelChoiceField(
-        queryset=Setor.objects.select_related(
-            "departamento",
-            "departamento__escola",
-            "departamento__secretaria",
-            "departamento__prefeitura",
-            "secretaria",
-        ),
-        required=False,
-        label="Setor",
-    )
-
-    def clean(self):
-        cleaned = super().clean()
-        escopo = cleaned.get("escopo")
-        # Exige exatamente um alvo de acordo com o escopo
-        need = {
-            "prefeitura": "prefeitura",
-            "secretaria": "secretaria",
-            "escola": "escola",
-            "setor": "setor",
-        }[escopo]
-        if not cleaned.get(need):
-            self.add_error(need, f"Selecione a/o {need}.")
-        return cleaned
+    # (opcional) se quiser filtrar por escopo, inicialize com user=...
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            self.fields["funcionario"].queryset = filter_funcionarios_by_scope(
+                Funcionario.objects.all(), user
+            ).order_by("nome")
 
 
-class RevogarAcessoForm(forms.Form):
-    escopo = forms.ChoiceField(choices=ESCOPO_CHOICES, label="Escopo")
-
-    prefeitura = forms.ModelChoiceField(
-        queryset=Prefeitura.objects.all(), required=False, label="Prefeitura"
-    )
-    secretaria = forms.ModelChoiceField(
-        queryset=Secretaria.objects.select_related("prefeitura"), required=False, label="Secretaria"
-    )
-    escola = forms.ModelChoiceField(
-        queryset=Escola.objects.select_related("secretaria__prefeitura"), required=False, label="Escola/Unidade"
-    )
-    setor = forms.ModelChoiceField(
-        queryset=Setor.objects.select_related(
-            "departamento",
-            "departamento__escola",
-            "departamento__secretaria",
-            "departamento__prefeitura",
-            "secretaria",
-        ),
-        required=False,
-        label="Setor",
-    )
-
-    def clean(self):
-        cleaned = super().clean()
-        escopo = cleaned.get("escopo")
-        need = {
-            "prefeitura": "prefeitura",
-            "secretaria": "secretaria",
-            "escola": "escola",
-            "setor": "setor",
-        }[escopo]
-        if not cleaned.get(need):
-            self.add_error(need, f"Selecione a/o {need}.")
-        return cleaned
-
-# controle/forms.py
-from django import forms
-from .models import RecessoFuncionario, Setor, Funcionario
-
+# ---------------------------
+# Recessos em lote
+# ---------------------------
 class RecessoBulkForm(forms.Form):
     setor = forms.ModelChoiceField(queryset=Setor.objects.all(), label="Setor")
     funcionarios = forms.ModelMultipleChoiceField(
@@ -217,11 +137,24 @@ class RecessoBulkForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         setor_id = kwargs.pop('setor_id', None)
+        user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
+
+        # filtra setores por escopo (se user fornecido)
+        if user is not None:
+            self.fields['setor'].queryset = filter_setores_by_scope(
+                Setor.objects.all(), user
+            ).order_by('nome')
+
         if setor_id:
-            self.fields['funcionarios'].queryset = Funcionario.objects.filter(setor_id=setor_id).order_by('nome')
+            base = Funcionario.objects.filter(setor_id=setor_id)
         else:
-            self.fields['funcionarios'].queryset = Funcionario.objects.none()
+            base = Funcionario.objects.none()
+
+        if user is not None:
+            base = filter_funcionarios_by_scope(base, user)
+
+        self.fields['funcionarios'].queryset = base.order_by('nome')
 
     def clean(self):
         cleaned = super().clean()
@@ -230,11 +163,10 @@ class RecessoBulkForm(forms.Form):
             self.add_error('data_fim', "Data fim não pode ser anterior à data início.")
         return cleaned
 
-# controle/forms.py
-from django import forms
-from .models import RecessoFuncionario, Setor, Funcionario
-from .permissions import filter_setores_by_scope, filter_funcionarios_by_scope
 
+# ---------------------------
+# Recesso (CRUD individual)
+# ---------------------------
 class RecessoFuncionarioForm(forms.ModelForm):
     class Meta:
         model = RecessoFuncionario
@@ -248,17 +180,14 @@ class RecessoFuncionarioForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
-        # <<< aceita e consome os kwargs extras
         user = kwargs.pop("user", None)
         setor_id = kwargs.pop("setor_id", None)
-
         super().__init__(*args, **kwargs)
 
-        # Filtra os conjuntos de opções conforme o escopo do usuário (se fornecido)
         if user is not None:
-            self.fields["setor"].queryset = (
-                filter_setores_by_scope(Setor.objects.all(), user).order_by("nome")
-            )
+            self.fields["setor"].queryset = filter_setores_by_scope(
+                Setor.objects.all(), user
+            ).order_by("nome")
             base_func = filter_funcionarios_by_scope(
                 Funcionario.objects.select_related("setor"), user
             )
@@ -270,4 +199,3 @@ class RecessoFuncionarioForm(forms.ModelForm):
             base_func = base_func.filter(setor_id=setor_id)
 
         self.fields["funcionario"].queryset = base_func.order_by("nome")
-

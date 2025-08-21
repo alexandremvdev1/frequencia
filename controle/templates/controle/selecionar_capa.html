@@ -30,7 +30,7 @@
 
 <nav class="navbar nav-pro navbar-dark mb-3">
   <div class="container-fluid">
-    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Livro de Frequência</a>
 
     <div class="d-flex align-items-center gap-2 ms-auto">
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:painel_controle' %}">← Voltar ao Painel</a>
@@ -65,10 +65,15 @@
             {% for s in setores %}
               {# value envia o NOME porque a view capas_livro_ponto espera ?setor=<nome> #}
               <option value="{{ s.nome }}">
-                {% if s.prefeitura %}{{ s.prefeitura.nome }} › {% endif %}
-                {% if s.secretaria_oficial %}{{ s.secretaria_oficial.nome }} › {% endif %}
-                {% if s.departamento %}{{ s.departamento.nome }} › {% endif %}
-                {{ s.nome }}
+                {% if s.orgao %}
+                  {{ s.orgao.secretaria.prefeitura.nome }} › {{ s.orgao.secretaria.nome }} › {{ s.orgao.nome }} › {{ s.nome }}
+                {% elif s.secretaria %}
+                  {{ s.secretaria.prefeitura.nome }} › {{ s.secretaria.nome }} › {{ s.nome }}
+                {% elif s.prefeitura %}
+                  {{ s.prefeitura.nome }} › {{ s.nome }}
+                {% else %}
+                  {{ s.nome }}
+                {% endif %}
               </option>
             {% endfor %}
           {% else %}

@@ -52,6 +52,42 @@ def _has_access_secretaria(user, secretaria, nivel=None):
         qs = qs.filter(nivel=str(nivel).upper())
     return qs.exists()
 
+def _resolve_secretaria_from_setor(setor):
+    """
+    Resolve a Secretaria de um Setor considerando:
+    - atributo oficial (secretaria_oficial) se existir
+    - atributo legado direto no Setor (secretaria)
+    - via Departamento (novo desenho): departamento.secretaria
+    - fallback adicional via departamento.escola.secretaria (legado, se existir)
+    """
+    if not setor:
+        return None
+
+    # oficial / utilitários já presentes no seu Setor
+    sec = getattr(setor, "secretaria_oficial", None)
+    if sec:
+        return sec
+
+    # legado direto
+    sec = getattr(setor, "secretaria", None)
+    if sec:
+        return sec
+
+    # via departamento (novo desenho)
+    dep = getattr(setor, "departamento", None)
+    if dep and getattr(dep, "secretaria", None):
+        return dep.secretaria
+
+    # fallback legado via escola → secretaria
+    try:
+        esc = getattr(dep, "escola", None)
+        if esc and getattr(esc, "secretaria", None):
+            return esc.secretaria
+    except Exception:
+        pass
+
+    return None
+
 
 # =========================
 # Filtros utilitários
@@ -122,7 +158,7 @@ def can_manage_secretaria(user, secretaria):
 
 @register.filter(name="can_access_setor")
 def can_access_setor(user, setor):
-    sec = getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)
+    sec = _resolve_secretaria_from_setor(setor)
     try:
         if user.scopes.filter(setor=setor).exists():
             return True
@@ -135,7 +171,7 @@ def can_access_setor(user, setor):
 
 @register.filter(name="can_manage_setor")
 def can_manage_setor(user, setor):
-    sec = getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)
+    sec = _resolve_secretaria_from_setor(setor)
     try:
         if user.scopes.filter(setor=setor, nivel=UserScope.Nivel.GERENCIA).exists():
             return True
@@ -149,7 +185,7 @@ def can_manage_setor(user, setor):
 @register.filter(name="can_access_funcionario")
 def can_access_funcionario(user, funcionario):
     setor = getattr(funcionario, "setor", None)
-    sec = (getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)) if setor else None
+    sec = _resolve_secretaria_from_setor(setor)
     try:
         if setor and user.scopes.filter(setor=setor).exists():
             return True
@@ -163,7 +199,7 @@ def can_access_funcionario(user, funcionario):
 @register.filter(name="can_manage_funcionario")
 def can_manage_funcionario(user, funcionario):
     setor = getattr(funcionario, "setor", None)
-    sec = (getattr(setor, "secretaria_oficial", None) or getattr(setor, "secretaria", None)) if setor else None
+    sec = _resolve_secretaria_from_setor(setor)
     try:
         if setor and user.scopes.filter(setor=setor, nivel=UserScope.Nivel.GERENCIA).exists():
             return True
@@ -200,15 +236,16 @@ def escopos_do_usuario(context):
     try:
         scopes = (
             user.scopes
-            .select_related("prefeitura", "secretaria", "escola", "departamento", "setor")
+            .select_related("prefeitura", "secretaria", "departamento", "setor")
             .all()
         )
         if scopes.exists():
+            # Usa os helpers do próprio modelo (alvo_tipo/alvo_nome) para manter labels corretos (inclui 'Órgão' quando aplicável)
             return [f"{s.alvo_tipo()}: {s.alvo_nome()}" for s in scopes]
     except Exception:
         pass
 
-    # Fallback legado
+    # Fallback legado: lista de Secretarias
     try:
         return list(
             AcessoSecretaria.objects.filter(user=user)
@@ -317,6 +354,7 @@ def somente_permitidos_por_funcao(funcionarios, user):
     except Exception:
         return []
 
+
 # --- labels e leitura dinâmica ----------------------------------------------
 @register.filter(name="get_label")
 def get_label(campo, campos_disponiveis):
@@ -361,6 +399,7 @@ def get_attr(obj, nome_attr):
         return getattr(obj, str(nome_attr))
     except Exception:
         return ""
+
 
 MESES_PT = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",

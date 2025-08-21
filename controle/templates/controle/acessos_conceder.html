@@ -19,12 +19,10 @@
     html{ font-size: var(--base-font); }
     body{ background:#f6f8fb; color:var(--ink); }
 
-    /* Navbar gradiente */
     .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
     .navbar-brand{ font-size:1rem; }
     .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
 
-    /* Welcome banner */
     .welcome{
       background:linear-gradient(90deg,#111827,#1f2937);
       color:#fff; border-radius:.75rem; padding:1rem 1.25rem;
@@ -50,7 +48,7 @@
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:scope_manager' %}" title="Voltar">
         ← Voltar
       </a>
-      <a class="btn btn-sm btn-danger" href="<a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}">">
+      <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}">
         <i class="fa-solid fa-right-from-bracket me-1"></i> Sair
       </a>
     </div>
@@ -122,7 +120,7 @@
       <div class="row g-3">
         <div class="col-12">
           <div class="alert alert-info py-2 px-3">
-            Selecione <strong>apenas um</strong> alvo (Prefeitura <em>ou</em> Secretaria <em>ou</em> Escola/Unidade <em>ou</em> Setor).
+            Selecione <strong>apenas um</strong> alvo (Prefeitura <em>ou</em> Secretaria <em>ou</em> Órgão <em>ou</em> Setor).
           </div>
         </div>
 
@@ -151,13 +149,13 @@
         </div>
 
         <div class="col-12 col-md-6">
-          <label class="form-label" for="id_escola">
-            <i class="fa-solid fa-school me-1"></i> Escola / Unidade
+          <label class="form-label" for="id_orgao">
+            <i class="fa-solid fa-sitemap me-1"></i> Órgão
           </label>
-          <select class="form-select escopo-input" id="id_escola" name="escola">
-            <option value="">— nenhuma —</option>
-            {% for e in escolas %}
-              <option value="{{ e.pk }}">{{ e.secretaria.prefeitura.nome }} — {{ e.secretaria.nome }} — {{ e.nome_escola }}</option>
+          <select class="form-select escopo-input" id="id_orgao" name="orgao">
+            <option value="">— nenhum —</option>
+            {% for o in orgaos %}
+              <option value="{{ o.pk }}">{{ o.secretaria.prefeitura.nome }} — {{ o.secretaria.nome }} — {{ o.nome }}</option>
             {% endfor %}
           </select>
         </div>
@@ -167,17 +165,18 @@
             <i class="fa-solid fa-diagram-project me-1"></i> Setor
           </label>
           <select class="form-select escopo-input" id="id_setor" name="setor">
-            <option value="">— nenhuma —</option>
+            <option value="">— nenhum —</option>
             {% for st in setores %}
               <option value="{{ st.pk }}">
-                {% if st.departamento %}
-                  {{ st.departamento.prefeitura|default_if_none:"" }}{% if st.departamento.prefeitura %} — {% endif %}
-                  {{ st.departamento.secretaria|default_if_none:"" }}{% if st.departamento.secretaria %} — {% endif %}
-                  {{ st.departamento.escola|default_if_none:"" }}{% if st.departamento.escola %} — {% endif %}
+                {% if st.orgao %}
+                  {{ st.orgao.secretaria.prefeitura.nome }} — {{ st.orgao.secretaria.nome }} — {{ st.orgao.nome }} — {{ st.nome }}
                 {% elif st.secretaria %}
-                  {{ st.secretaria.prefeitura }} — {{ st.secretaria }}
+                  {{ st.secretaria.prefeitura.nome }} — {{ st.secretaria.nome }} — {{ st.nome }}
+                {% elif st.prefeitura %}
+                  {{ st.prefeitura.nome }} — {{ st.nome }}
+                {% else %}
+                  {{ st.nome }}
                 {% endif %}
-                {{ st.nome }}
               </option>
             {% endfor %}
           </select>
@@ -209,7 +208,7 @@
 
 <script>
 (function(){
-  // Garante a regra "somente um alvo": quando um select recebe valor, zera os demais
+  // Regra "somente um alvo": quando um select recebe valor, zera os demais
   const inputs = Array.from(document.querySelectorAll('.escopo-input'));
   function onChange(ev){
     if (!ev.target.value) return;

@@ -1,4 +1,3 @@
-# controle/admin.py
 from django import forms
 from django.contrib import admin, messages
 from django.shortcuts import render
@@ -7,9 +6,9 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils import timezone
 
 from .models import (
-    Prefeitura, Secretaria, Escola, Departamento, Setor, Funcionario,
+    Prefeitura, Secretaria, Orgao, Setor, Funcionario,
     HorarioTrabalho, Feriado, FolhaFrequencia, SabadoLetivo,
-    AcessoPrefeitura, AcessoSecretaria, AcessoEscola, AcessoSetor, NivelAcesso,
+    AcessoPrefeitura, AcessoSecretaria, AcessoOrgao, AcessoSetor, NivelAcesso,
     UserScope, FuncaoPermissao,
 )
 from .admin_forms import ConcederAcessoForm, RevogarAcessoForm
@@ -48,11 +47,11 @@ class AcessoSecretariaInline(admin.TabularInline):
     autocomplete_fields = ("secretaria",)
 
 
-class AcessoEscolaInline(admin.TabularInline):
-    model = AcessoEscola
+class AcessoOrgaoInline(admin.TabularInline):
+    model = AcessoOrgao
     extra = 0
-    fields = ("escola", "nivel")
-    autocomplete_fields = ("escola",)
+    fields = ("orgao", "nivel")
+    autocomplete_fields = ("orgao",)
 
 
 class AcessoSetorInline(admin.TabularInline):
@@ -63,7 +62,7 @@ class AcessoSetorInline(admin.TabularInline):
 
 
 # =========================
-# Prefeitura / Secretaria / Escola
+# Prefeitura / Secretaria / Órgão
 # =========================
 @admin.register(Prefeitura)
 class PrefeituraAdmin(admin.ModelAdmin):
@@ -83,58 +82,24 @@ class SecretariaAdmin(admin.ModelAdmin):
     list_per_page = 25
 
 
-@admin.register(Escola)
-class EscolaAdmin(admin.ModelAdmin):
-    list_display = ("nome_escola", "nome_secretaria", "cidade", "uf", "secretaria")
-    list_filter = ("cidade", "uf", "secretaria")
-    search_fields = ("nome_escola", "nome_secretaria", "cnpj", "secretaria__nome")
-    ordering = ("nome_escola",)
-    autocomplete_fields = ("secretaria",)
-    list_select_related = ("secretaria",)
+@admin.register(Orgao)
+class OrgaoAdmin(admin.ModelAdmin):
+    list_display = ("nome", "secretaria", "cnpj", "telefone", "email")
+    list_filter = ("secretaria", "secretaria__prefeitura")
+    search_fields = ("nome", "cnpj", "email", "telefone", "secretaria__nome", "secretaria__prefeitura__nome")
+    ordering = ("secretaria__prefeitura__nome", "secretaria__nome", "nome")
+    list_select_related = ("secretaria", "secretaria__prefeitura")
     list_per_page = 25
 
 
 # =========================
-# Departamento
-# =========================
-@admin.register(Departamento)
-class DepartamentoAdmin(admin.ModelAdmin):
-    list_display = ("nome", "tipo", "pai_tipo", "pai_nome")
-    list_filter = ("tipo", "prefeitura", "secretaria", "escola")
-    search_fields = (
-        "nome",
-        "prefeitura__nome",
-        "secretaria__nome",
-        "escola__nome_escola",
-    )
-    ordering = ("nome",)
-    autocomplete_fields = ("prefeitura", "secretaria", "escola")
-    list_select_related = ("prefeitura", "secretaria", "escola")
-    list_per_page = 25
-
-    def pai_tipo(self, obj):
-        if obj.prefeitura_id: return "Prefeitura"
-        if obj.secretaria_id: return "Secretaria"
-        if obj.escola_id: return "Escola"
-        return "-"
-    pai_tipo.short_description = "Nível"
-
-    def pai_nome(self, obj):
-        if obj.prefeitura_id: return obj.prefeitura.nome
-        if obj.secretaria_id: return obj.secretaria.nome
-        if obj.escola_id: return obj.escola.nome_escola
-        return "-"
-    pai_nome.short_description = "Vinculado a"
-
-
-# =========================
-# Setor (com escolha de Chefe)
+# Setor (com escolha de Chefe via FK)
 # =========================
 class SetorAdminForm(forms.ModelForm):
     chefe = forms.ModelChoiceField(
         label="Chefe do setor",
         required=False,
-        queryset=Funcionario.objects.none(),
+        queryset=Funcionario.objects.all().order_by("nome"),
         help_text="Selecione o servidor que será a chefia imediata deste setor.",
     )
 
@@ -145,14 +110,8 @@ class SetorAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         inst = self.instance
-        if inst and inst.pk:
-            qs = Funcionario.objects.filter(setor=inst).order_by("nome")
-            self.fields["chefe"].queryset = qs
-            atual = qs.filter(is_chefe_setor=True).first()
-            if atual:
-                self.initial["chefe"] = atual.pk
-        else:
-            self.fields["chefe"].queryset = Funcionario.objects.none()
+        if inst and inst.pk and inst.chefe_id:
+            self.initial["chefe"] = inst.chefe_id
 
 
 @admin.register(Setor)
@@ -161,85 +120,91 @@ class SetorAdmin(admin.ModelAdmin):
 
     list_display = (
         "nome",
-        "departamento",
-        "secretaria_legado",
-        "escola_nome",
-        "secretaria_oficial_nome",
-        "prefeitura_nome",
+        "pai_tipo",
+        "pai_nome",
+        "secretaria_resolvida_nome",
+        "prefeitura_resolvida_nome",
         "chefe_nome",
     )
-    list_filter = (
-        "departamento",
-        "departamento__escola",
-        "departamento__secretaria",
-        "departamento__prefeitura",
-        "secretaria",  # legado
-    )
+    list_filter = ("prefeitura", "secretaria", "orgao")
     search_fields = (
         "nome",
-        "departamento__nome",
-        "departamento__escola__nome_escola",
-        "departamento__secretaria__nome",
-        "departamento__prefeitura__nome",
+        "prefeitura__nome",
         "secretaria__nome",
+        "orgao__nome",
+        "orgao__secretaria__nome",
+        "orgao__secretaria__prefeitura__nome",
     )
-    ordering = ("departamento__nome", "nome")
-    autocomplete_fields = ("departamento", "secretaria")
-    list_select_related = (
-        "departamento",
-        "departamento__escola",
-        "departamento__secretaria",
-        "departamento__prefeitura",
-        "secretaria",
-    )
+    ordering = ("nome",)
+    autocomplete_fields = ("prefeitura", "secretaria", "orgao", "chefe")
+    list_select_related = ("prefeitura", "secretaria", "orgao", "orgao__secretaria", "orgao__secretaria__prefeitura")
     list_per_page = 25
 
     fieldsets = (
         (None, {"fields": ("nome",)}),
-        ("Vinculação", {"fields": ("departamento", "secretaria")}),
+        ("Vinculação (marque exatamente um)", {"fields": ("prefeitura", "secretaria", "orgao")}),
         ("Chefia", {"fields": ("chefe",)}),
     )
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
 
+        # Define/atualiza a chefia do setor (via FK) – NÃO altera o setor do funcionário
         chefe = form.cleaned_data.get("chefe")
-        if chefe:
-            if chefe.setor_id != obj.pk:
-                chefe.setor = obj
+        if obj.chefe_id != (chefe.id if chefe else None):
+            obj.chefe = chefe
+            obj.save(update_fields=["chefe"])
 
-            Funcionario.objects.filter(setor=obj).exclude(pk=chefe.pk).update(is_chefe_setor=False)
-
+        # Opcional: manter o flag informativo no funcionário
+        if chefe and not chefe.is_chefe_setor:
+            chefe.is_chefe_setor = True
             if not chefe.chefe_setor_desde:
                 chefe.chefe_setor_desde = timezone.localdate()
-            chefe.is_chefe_setor = True
-            chefe.save(update_fields=["setor", "is_chefe_setor", "chefe_setor_desde"])
+            chefe.save(update_fields=["is_chefe_setor", "chefe_setor_desde"])
 
     # helpers
-    def secretaria_legado(self, obj):
-        return obj.secretaria or "-"
-    secretaria_legado.short_description = "Secretaria (legado)"
+    def pai_tipo(self, obj):
+        if obj.orgao_id:
+            return "Órgão"
+        if obj.secretaria_id:
+            return "Secretaria"
+        if obj.prefeitura_id:
+            return "Prefeitura"
+        return "-"
+    pai_tipo.short_description = "Nível"
 
-    def escola_nome(self, obj):
-        return obj.escola.nome_escola if obj.escola else "-"
-    escola_nome.short_description = "Escola"
+    def pai_nome(self, obj):
+        if obj.orgao_id:
+            return obj.orgao.nome
+        if obj.secretaria_id:
+            return obj.secretaria.nome
+        if obj.prefeitura_id:
+            return obj.prefeitura.nome
+        return "-"
+    pai_nome.short_description = "Vinculado a"
 
-    def secretaria_oficial_nome(self, obj):
-        s = obj.secretaria_oficial
-        return s.nome if s else "-"
-    secretaria_oficial_nome.short_description = "Secretaria (oficial)"
+    def secretaria_resolvida_nome(self, obj):
+        # secretaria direta ou via orgao
+        if obj.secretaria_id:
+            return obj.secretaria.nome
+        if obj.orgao_id and obj.orgao.secretaria_id:
+            return obj.orgao.secretaria.nome
+        return "-"
+    secretaria_resolvida_nome.short_description = "Secretaria (resolvida)"
 
-    def prefeitura_nome(self, obj):
-        p = obj.prefeitura
-        return p.nome if p else "-"
-    prefeitura_nome.short_description = "Prefeitura"
+    def prefeitura_resolvida_nome(self, obj):
+        # prefeitura direta; ou via secretaria; ou via orgao->secretaria
+        if obj.prefeitura_id:
+            return obj.prefeitura.nome
+        if obj.secretaria_id and obj.secretaria.prefeitura_id:
+            return obj.secretaria.prefeitura.nome
+        if obj.orgao_id and obj.orgao.secretaria_id and obj.orgao.secretaria.prefeitura_id:
+            return obj.orgao.secretaria.prefeitura.nome
+        return "-"
+    prefeitura_resolvida_nome.short_description = "Prefeitura (resolvida)"
 
     def chefe_nome(self, obj):
-        chefe = (Funcionario.objects
-                 .filter(setor=obj, is_chefe_setor=True)
-                 .order_by('chefe_setor_desde', 'id')
-                 .first())
-        return chefe.nome if chefe else "-"
+        return obj.chefe.nome if obj.chefe else "-"
     chefe_nome.short_description = "Chefe do setor"
 
 
@@ -253,7 +218,7 @@ class FuncionarioAdmin(admin.ModelAdmin):
     list_display = (
         "nome", "matricula", "funcao", "cargo",
         "setor",
-        "departamento_nome", "escola_nome", "secretaria_nome", "prefeitura_nome",
+        "orgao_nome", "secretaria_nome", "prefeitura_nome",
         "turno", "serie", "turma", "tipo_vinculo",
         "is_chefe_setor", "chefe_setor_desde",
     )
@@ -261,11 +226,9 @@ class FuncionarioAdmin(admin.ModelAdmin):
         "funcao", "cargo", "turno", "serie", "turma",
         "tipo_vinculo",
         "setor",
-        "setor__departamento",
-        "setor__departamento__escola",
-        "setor__departamento__secretaria",
-        "setor__departamento__prefeitura",
-        "setor__secretaria",  # legado
+        "setor__orgao",
+        "setor__secretaria",
+        "setor__prefeitura",
         "is_chefe_setor",
     )
     search_fields = ("nome", "matricula", "cpf", "rg", "email", "telefone")
@@ -274,11 +237,9 @@ class FuncionarioAdmin(admin.ModelAdmin):
     inlines = [HorarioTrabalhoInline]
     list_select_related = (
         "setor",
-        "setor__departamento",
-        "setor__departamento__escola",
-        "setor__departamento__secretaria",
-        "setor__departamento__prefeitura",
+        "setor__orgao",
         "setor__secretaria",
+        "setor__prefeitura",
     )
     list_per_page = 25
 
@@ -289,9 +250,10 @@ class FuncionarioAdmin(admin.ModelAdmin):
         ("Lotação", {
             "fields": (("setor",),)
         }),
-        ("Chefia de Setor", {
+        ("Chefia de Setor (flag informativo)", {
             "fields": (("is_chefe_setor", "chefe_setor_desde"),),
-            "description": "Marque se este funcionário é o chefe do setor. O sistema garante apenas um chefe por setor."
+            "description": "Use o campo CHEFE no cadastro do Setor para definir a chefia. "
+                           "Este flag apenas indica se a pessoa exerce alguma chefia."
         }),
         ("Contato", {
             "fields": (("telefone", "email"),)
@@ -324,6 +286,10 @@ class FuncionarioAdmin(admin.ModelAdmin):
     actions = ["marcar_como_chefe", "remover_chefe"]
 
     def marcar_como_chefe(self, request, queryset):
+        """
+        Define o funcionário selecionado como chefe do SEU setor atual.
+        (Não afeta outros setores onde ele possa ser chefe.)
+        """
         if queryset.count() != 1:
             self.message_user(
                 request,
@@ -341,47 +307,61 @@ class FuncionarioAdmin(admin.ModelAdmin):
             )
             return
 
-        Funcionario.objects.filter(setor=funcionario.setor).exclude(pk=funcionario.pk).update(is_chefe_setor=False)
+        # Seta a chefia via FK no Setor
+        setor = funcionario.setor
+        if setor.chefe_id != funcionario.id:
+            setor.chefe = funcionario
+            setor.save(update_fields=["chefe"])
 
-        funcionario.is_chefe_setor = True
+        # Marca o flag informativo
+        if not funcionario.is_chefe_setor:
+            funcionario.is_chefe_setor = True
         if not funcionario.chefe_setor_desde:
             funcionario.chefe_setor_desde = timezone.localdate()
         funcionario.save(update_fields=["is_chefe_setor", "chefe_setor_desde"])
 
-        self.message_user(request, f"{funcionario.nome} marcado como chefe do setor {funcionario.setor}.", level=messages.SUCCESS)
+        self.message_user(request, f"{funcionario.nome} agora é chefe do setor {funcionario.setor}.", level=messages.SUCCESS)
 
-    marcar_como_chefe.short_description = "Marcar como chefe do setor"
+    marcar_como_chefe.short_description = "Definir como chefe do seu setor atual"
 
     def remover_chefe(self, request, queryset):
+        """
+        Remove o(s) funcionário(s) como chefe de TODOS os setores onde constam como chefe.
+        """
+        num_setores = Setor.objects.filter(chefe__in=queryset).update(chefe=None)
+        # Flag informativo (opcional): desmarca
         updated = queryset.update(is_chefe_setor=False)
-        self.message_user(request, f"{updated} funcionário(s) deixaram de ser chefes.", level=messages.SUCCESS)
+        self.message_user(
+            request,
+            f"Chefia removida em {num_setores} setor(es); {updated} funcionário(s) sem marcação de chefe.",
+            level=messages.SUCCESS
+        )
 
-    remover_chefe.short_description = "Remover marcação de chefe"
-
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-
-        if obj.is_chefe_setor and obj.setor_id:
-            Funcionario.objects.filter(setor=obj.setor).exclude(pk=obj.pk).update(is_chefe_setor=False)
-            if not obj.chefe_setor_desde:
-                obj.chefe_setor_desde = timezone.localdate()
-                obj.save(update_fields=["chefe_setor_desde"])
+    remover_chefe.short_description = "Remover chefias deste(s) funcionário(s)"
 
     # helpers
-    def departamento_nome(self, obj):
-        return obj.departamento.nome if obj.departamento else "-"
-    departamento_nome.short_description = "Departamento"
-
-    def escola_nome(self, obj):
-        return obj.escola.nome_escola if obj.escola else "-"
-    escola_nome.short_description = "Escola"
+    def orgao_nome(self, obj):
+        o = obj.setor.orgao if obj.setor else None
+        return o.nome if o else "-"
+    orgao_nome.short_description = "Órgão"
 
     def secretaria_nome(self, obj):
-        return obj.secretaria.nome if obj.secretaria else "-"
+        s = obj.setor.secretaria if obj.setor and obj.setor.secretaria_id else (
+            obj.setor.orgao.secretaria if obj.setor and obj.setor.orgao_id and obj.setor.orgao.secretaria_id else None
+        )
+        return s.nome if s else "-"
     secretaria_nome.short_description = "Secretaria"
 
     def prefeitura_nome(self, obj):
-        return obj.prefeitura.nome if obj.prefeitura else "-"
+        p = None
+        if obj.setor:
+            if obj.setor.prefeitura_id:
+                p = obj.setor.prefeitura
+            elif obj.setor.secretaria_id and obj.setor.secretaria.prefeitura_id:
+                p = obj.setor.secretaria.prefeitura
+            elif obj.setor.orgao_id and obj.setor.orgao.secretaria_id and obj.setor.orgao.secretaria.prefeitura_id:
+                p = obj.setor.orgao.secretaria.prefeitura
+        return p.nome if p else "-"
     prefeitura_nome.short_description = "Prefeitura"
 
 
@@ -392,27 +372,23 @@ class FuncionarioAdmin(admin.ModelAdmin):
 class HorarioTrabalhoAdmin(admin.ModelAdmin):
     list_display = (
         "funcionario", "turno", "horario_inicio", "horario_fim",
-        "setor_nome", "departamento_nome", "escola_nome", "secretaria_nome", "prefeitura_nome",
+        "setor_nome", "orgao_nome", "secretaria_nome", "prefeitura_nome",
     )
     list_filter = (
         "turno",
         "funcionario__setor",
-        "funcionario__setor__departamento",
-        "funcionario__setor__departamento__escola",
-        "funcionario__setor__departamento__secretaria",
-        "funcionario__setor__departamento__prefeitura",
-        "funcionario__setor__secretaria",  # legado
+        "funcionario__setor__orgao",
+        "funcionario__setor__secretaria",
+        "funcionario__setor__prefeitura",
     )
     search_fields = ("funcionario__nome", "funcionario__matricula")
     autocomplete_fields = ("funcionario",)
     list_select_related = (
         "funcionario",
         "funcionario__setor",
-        "funcionario__setor__departamento",
-        "funcionario__setor__departamento__escola",
-        "funcionario__setor__departamento__secretaria",
-        "funcionario__setor__departamento__prefeitura",
+        "funcionario__setor__orgao",
         "funcionario__setor__secretaria",
+        "funcionario__setor__prefeitura",
     )
     ordering = ("funcionario__nome", "turno")
     list_per_page = 25
@@ -421,23 +397,31 @@ class HorarioTrabalhoAdmin(admin.ModelAdmin):
         return obj.funcionario.setor.nome if obj.funcionario and obj.funcionario.setor else "-"
     setor_nome.short_description = "Setor"
 
-    def departamento_nome(self, obj):
-        d = obj.funcionario.departamento if obj.funcionario else None
-        return d.nome if d else "-"
-    departamento_nome.short_description = "Departamento"
-
-    def escola_nome(self, obj):
-        e = obj.funcionario.escola if obj.funcionario else None
-        return e.nome_escola if e else "-"
-    escola_nome.short_description = "Escola"
+    def orgao_nome(self, obj):
+        o = obj.funcionario.setor.orgao if obj.funcionario and obj.funcionario.setor else None
+        return o.nome if o else "-"
+    orgao_nome.short_description = "Órgão"
 
     def secretaria_nome(self, obj):
-        s = obj.funcionario.secretaria if obj.funcionario else None
+        s = None
+        if obj.funcionario and obj.funcionario.setor:
+            if obj.funcionario.setor.secretaria_id:
+                s = obj.funcionario.setor.secretaria
+            elif obj.funcionario.setor.orgao_id and obj.funcionario.setor.orgao.secretaria_id:
+                s = obj.funcionario.setor.orgao.secretaria
         return s.nome if s else "-"
     secretaria_nome.short_description = "Secretaria"
 
     def prefeitura_nome(self, obj):
-        p = obj.funcionario.prefeitura if obj.funcionario else None
+        p = None
+        if obj.funcionario and obj.funcionario.setor:
+            setor = obj.funcionario.setor
+            if setor.prefeitura_id:
+                p = setor.prefeitura
+            elif setor.secretaria_id and setor.secretaria.prefeitura_id:
+                p = setor.secretaria.prefeitura
+            elif setor.orgao_id and setor.orgao.secretaria_id and setor.orgao.secretaria.prefeitura_id:
+                p = setor.orgao.secretaria.prefeitura
         return p.nome if p else "-"
     prefeitura_nome.short_description = "Prefeitura"
 
@@ -475,16 +459,14 @@ class FolhaFrequenciaAdmin(admin.ModelAdmin):
     readonly_fields = ("data_geracao",)
     list_display = (
         "funcionario", "mes", "ano", "data_geracao",
-        "setor_nome", "departamento_nome", "escola_nome", "secretaria_nome", "prefeitura_nome",
+        "setor_nome", "orgao_nome", "secretaria_nome", "prefeitura_nome",
     )
     list_filter = (
         "ano", "mes",
         "funcionario__setor",
-        "funcionario__setor__departamento",
-        "funcionario__setor__departamento__escola",
-        "funcionario__setor__departamento__secretaria",
-        "funcionario__setor__departamento__prefeitura",
-        "funcionario__setor__secretaria",  # legado
+        "funcionario__setor__orgao",
+        "funcionario__setor__secretaria",
+        "funcionario__setor__prefeitura",
     )
     search_fields = ("funcionario__nome", "funcionario__matricula")
     raw_id_fields = ("funcionario",)
@@ -492,11 +474,9 @@ class FolhaFrequenciaAdmin(admin.ModelAdmin):
     list_select_related = (
         "funcionario",
         "funcionario__setor",
-        "funcionario__setor__departamento",
-        "funcionario__setor__departamento__escola",
-        "funcionario__setor__departamento__secretaria",
-        "funcionario__setor__departamento__prefeitura",
+        "funcionario__setor__orgao",
         "funcionario__setor__secretaria",
+        "funcionario__setor__prefeitura",
     )
     ordering = ("-ano", "-mes", "funcionario__nome")
     list_per_page = 25
@@ -506,29 +486,37 @@ class FolhaFrequenciaAdmin(admin.ModelAdmin):
     setor_nome.short_description = "Setor"
     setor_nome.admin_order_field = "funcionario__setor__nome"
 
-    def departamento_nome(self, obj):
-        d = obj.funcionario.departamento if obj.funcionario else None
-        return d.nome if d else "-"
-    departamento_nome.short_description = "Departamento"
-    departamento_nome.admin_order_field = "funcionario__setor__departamento__nome"
-
-    def escola_nome(self, obj):
-        e = obj.funcionario.escola if obj.funcionario else None
-        return e.nome_escola if e else "-"
-    escola_nome.short_description = "Escola"
-    escola_nome.admin_order_field = "funcionario__setor__departamento__escola__nome_escola"
+    def orgao_nome(self, obj):
+        o = obj.funcionario.setor.orgao if obj.funcionario and obj.funcionario.setor else None
+        return o.nome if o else "-"
+    orgao_nome.short_description = "Órgão"
+    orgao_nome.admin_order_field = "funcionario__setor__orgao__nome"
 
     def secretaria_nome(self, obj):
-        s = obj.funcionario.secretaria if obj.funcionario else None
+        s = None
+        if obj.funcionario and obj.funcionario.setor:
+            setor = obj.funcionario.setor
+            if setor.secretaria_id:
+                s = setor.secretaria
+            elif setor.orgao_id and setor.orgao.secretaria_id:
+                s = setor.orgao.secretaria
         return s.nome if s else "-"
     secretaria_nome.short_description = "Secretaria"
-    secretaria_nome.admin_order_field = "funcionario__setor__departamento__secretaria__nome"
+    secretaria_nome.admin_order_field = "funcionario__setor__secretaria__nome"
 
     def prefeitura_nome(self, obj):
-        p = obj.funcionario.prefeitura if obj.funcionario else None
+        p = None
+        if obj.funcionario and obj.funcionario.setor:
+            setor = obj.funcionario.setor
+            if setor.prefeitura_id:
+                p = setor.prefeitura
+            elif setor.secretaria_id and setor.secretaria.prefeitura_id:
+                p = setor.secretaria.prefeitura
+            elif setor.orgao_id and setor.orgao.secretaria_id and setor.orgao.secretaria.prefeitura_id:
+                p = setor.orgao.secretaria.prefeitura
         return p.nome if p else "-"
     prefeitura_nome.short_description = "Prefeitura"
-    prefeitura_nome.admin_order_field = "funcionario__setor__departamento__secretaria__prefeitura__nome"
+    prefeitura_nome.admin_order_field = "funcionario__setor__prefeitura__nome"
 
 
 # =========================
@@ -568,78 +556,79 @@ class AcessoSecretariaAdmin(_AcessoBaseAdmin):
     list_per_page = 25
 
 
-@admin.register(AcessoEscola)
-class AcessoEscolaAdmin(_AcessoBaseAdmin):
-    list_display = ("user", "escola", "nivel", "prefeitura_nome", "secretaria_nome")
-    list_filter = ("nivel", "escola", "escola__secretaria", "escola__secretaria__prefeitura")
-    search_fields = ("user__username", "user__email", "escola__nome_escola", "escola__secretaria__nome", "escola__secretaria__prefeitura__nome")
-    autocomplete_fields = ("user", "escola")
-    list_select_related = ("escola", "escola__secretaria", "escola__secretaria__prefeitura")
-    ordering = ("escola__secretaria__prefeitura__nome", "escola__secretaria__nome", "escola__nome_escola", "user__username")
+@admin.register(AcessoOrgao)
+class AcessoOrgaoAdmin(_AcessoBaseAdmin):
+    list_display = ("user", "orgao", "nivel", "secretaria_nome", "prefeitura_nome")
+    list_filter = ("nivel", "orgao", "orgao__secretaria", "orgao__secretaria__prefeitura")
+    search_fields = ("user__username", "user__email", "orgao__nome", "orgao__secretaria__nome", "orgao__secretaria__prefeitura__nome")
+    autocomplete_fields = ("user", "orgao")
+    list_select_related = ("orgao", "orgao__secretaria", "orgao__secretaria__prefeitura")
+    ordering = ("orgao__secretaria__prefeitura__nome", "orgao__secretaria__nome", "orgao__nome", "user__username")
     list_per_page = 25
 
-    def prefeitura_nome(self, obj):
-        p = obj.escola.secretaria.prefeitura if obj.escola and obj.escola.secretaria else None
-        return p.nome if p else "-"
-    prefeitura_nome.short_description = "Prefeitura"
-
     def secretaria_nome(self, obj):
-        s = obj.escola.secretaria if obj.escola else None
+        s = obj.orgao.secretaria if obj.orgao else None
         return s.nome if s else "-"
     secretaria_nome.short_description = "Secretaria"
+
+    def prefeitura_nome(self, obj):
+        p = obj.orgao.secretaria.prefeitura if obj.orgao and obj.orgao.secretaria else None
+        return p.nome if p else "-"
+    prefeitura_nome.short_description = "Prefeitura"
 
 
 @admin.register(AcessoSetor)
 class AcessoSetorAdmin(_AcessoBaseAdmin):
-    list_display = ("user", "setor", "nivel", "departamento_nome", "escola_nome", "secretaria_nome", "prefeitura_nome")
+    list_display = ("user", "setor", "nivel", "orgao_nome", "secretaria_nome", "prefeitura_nome")
     list_filter = (
         "nivel",
         "setor",
-        "setor__departamento",
-        "setor__departamento__escola",
-        "setor__departamento__secretaria",
-        "setor__departamento__prefeitura",
-        "setor__secretaria",  # legado
+        "setor__orgao",
+        "setor__secretaria",
+        "setor__prefeitura",
     )
     search_fields = (
         "user__username", "user__email",
         "setor__nome",
-        "setor__departamento__nome",
-        "setor__departamento__escola__nome_escola",
-        "setor__departamento__secretaria__nome",
-        "setor__departamento__prefeitura__nome",
+        "setor__orgao__nome",
         "setor__secretaria__nome",
+        "setor__prefeitura__nome",
     )
     autocomplete_fields = ("user", "setor")
     list_select_related = (
         "setor",
-        "setor__departamento",
-        "setor__departamento__escola",
-        "setor__departamento__secretaria",
-        "setor__departamento__prefeitura",
+        "setor__orgao",
         "setor__secretaria",
+        "setor__prefeitura",
     )
-    ordering = ("setor__departamento__secretaria__prefeitura__nome", "setor__departamento__secretaria__nome", "setor__departamento__escola__nome_escola", "setor__nome", "user__username")
+    ordering = ("setor__prefeitura__nome", "setor__secretaria__nome", "setor__orgao__nome", "setor__nome", "user__username")
     list_per_page = 25
 
-    def departamento_nome(self, obj):
-        d = obj.setor.departamento if obj.setor else None
-        return d.nome if d else "-"
-    departamento_nome.short_description = "Departamento"
-
-    def escola_nome(self, obj):
-        e = obj.setor.escola if obj.setor else None
-        return e.nome_escola if e else "-"
-    escola_nome.short_description = "Escola"
+    def orgao_nome(self, obj):
+        o = obj.setor.orgao if obj.setor else None
+        return o.nome if o else "-"
+    orgao_nome.short_description = "Órgão"
 
     def secretaria_nome(self, obj):
-        s = obj.setor.secretaria_oficial if obj.setor else None
-        return s.nome if s else "-"
+        if not obj.setor:
+            return "-"
+        if obj.setor.secretaria_id:
+            return obj.setor.secretaria.nome
+        if obj.setor.orgao_id and obj.setor.orgao.secretaria_id:
+            return obj.setor.orgao.secretaria.nome
+        return "-"
     secretaria_nome.short_description = "Secretaria"
 
     def prefeitura_nome(self, obj):
-        p = obj.setor.prefeitura if obj.setor else None
-        return p.nome if p else "-"
+        if not obj.setor:
+            return "-"
+        if obj.setor.prefeitura_id:
+            return obj.setor.prefeitura.nome
+        if obj.setor.secretaria_id and obj.setor.secretaria.prefeitura_id:
+            return obj.setor.secretaria.prefeitura.nome
+        if obj.setor.orgao_id and obj.setor.orgao.secretaria_id and obj.setor.orgao.secretaria.prefeitura_id:
+            return obj.setor.orgao.secretaria.prefeitura.nome
+        return "-"
     prefeitura_nome.short_description = "Prefeitura"
 
 
@@ -655,7 +644,7 @@ except admin.sites.NotRegistered:
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    inlines = [AcessoPrefeituraInline, AcessoSecretariaInline, AcessoEscolaInline, AcessoSetorInline]
+    inlines = [AcessoPrefeituraInline, AcessoSecretariaInline, AcessoOrgaoInline, AcessoSetorInline]
     actions = ["conceder_acesso_bulk", "revogar_acesso_bulk"]
 
     def conceder_acesso_bulk(self, request, queryset):
@@ -672,42 +661,24 @@ class UserAdmin(BaseUserAdmin):
                     if escopo == "prefeitura":
                         obj = form.cleaned_data["prefeitura"]
                         acc, was_created = AcessoPrefeitura.objects.get_or_create(user=user, prefeitura=obj, defaults={"nivel": nivel})
-                        if not was_created and acc.nivel != nivel:
-                            acc.nivel = nivel
-                            acc.save(update_fields=["nivel"])
-                            updated += 1
-                        else:
-                            created += 1 if was_created else 0
-
                     elif escopo == "secretaria":
                         obj = form.cleaned_data["secretaria"]
                         acc, was_created = AcessoSecretaria.objects.get_or_create(user=user, secretaria=obj, defaults={"nivel": nivel})
-                        if not was_created and acc.nivel != nivel:
-                            acc.nivel = nivel
-                            acc.save(update_fields=["nivel"])
-                            updated += 1
-                        else:
-                            created += 1 if was_created else 0
-
-                    elif escopo == "escola":
-                        obj = form.cleaned_data["escola"]
-                        acc, was_created = AcessoEscola.objects.get_or_create(user=user, escola=obj, defaults={"nivel": nivel})
-                        if not was_created and acc.nivel != nivel:
-                            acc.nivel = nivel
-                            acc.save(update_fields=["nivel"])
-                            updated += 1
-                        else:
-                            created += 1 if was_created else 0
-
+                    elif escopo == "orgao":
+                        obj = form.cleaned_data["orgao"]
+                        acc, was_created = AcessoOrgao.objects.get_or_create(user=user, orgao=obj, defaults={"nivel": nivel})
                     elif escopo == "setor":
                         obj = form.cleaned_data["setor"]
                         acc, was_created = AcessoSetor.objects.get_or_create(user=user, setor=obj, defaults={"nivel": nivel})
-                        if not was_created and acc.nivel != nivel:
-                            acc.nivel = nivel
-                            acc.save(update_fields=["nivel"])
-                            updated += 1
-                        else:
-                            created += 1 if was_created else 0
+                    else:
+                        continue
+
+                    if not was_created and acc.nivel != nivel:
+                        acc.nivel = nivel
+                        acc.save(update_fields=["nivel"])
+                        updated += 1
+                    else:
+                        created += 1 if was_created else 0
 
                 self.message_user(
                     request,
@@ -741,9 +712,9 @@ class UserAdmin(BaseUserAdmin):
                 elif escopo == "secretaria":
                     obj = form.cleaned_data["secretaria"]
                     total = AcessoSecretaria.objects.filter(user__in=queryset, secretaria=obj).delete()[0]
-                elif escopo == "escola":
-                    obj = form.cleaned_data["escola"]
-                    total = AcessoEscola.objects.filter(user__in=queryset, escola=obj).delete()[0]
+                elif escopo == "orgao":
+                    obj = form.cleaned_data["orgao"]
+                    total = AcessoOrgao.objects.filter(user__in=queryset, orgao=obj).delete()[0]
                 elif escopo == "setor":
                     obj = form.cleaned_data["setor"]
                     total = AcessoSetor.objects.filter(user__in=queryset, setor=obj).delete()[0]
@@ -770,13 +741,13 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(UserScope)
 class UserScopeAdmin(admin.ModelAdmin):
     list_display = ("user", "alvo_tipo", "alvo_nome", "nivel")
-    list_filter = ("nivel", "prefeitura", "secretaria", "escola", "departamento", "setor")
+    list_filter = ("nivel", "prefeitura", "secretaria", "orgao", "setor")
     search_fields = (
         "user__username", "user__email",
         "prefeitura__nome", "secretaria__nome",
-        "escola__nome_escola", "departamento__nome", "setor__nome",
+        "orgao__nome", "setor__nome",
     )
-    autocomplete_fields = ("user", "prefeitura", "secretaria", "escola", "departamento", "setor")
+    autocomplete_fields = ("user", "prefeitura", "secretaria", "orgao", "setor")
     ordering = ("user__username",)
 
     def alvo_tipo(self, obj):
@@ -793,8 +764,8 @@ class UserScopeAdmin(admin.ModelAdmin):
 # =========================
 @admin.register(FuncaoPermissao)
 class FuncaoPermissaoAdmin(admin.ModelAdmin):
-    list_display = ("user", "nome_funcao", "nivel", "secretaria", "setor")
-    list_filter = ("nivel", "secretaria", "setor")
+    list_display = ("user", "nome_funcao", "nivel", "secretaria", "orgao", "setor")
+    list_filter = ("nivel", "secretaria", "orgao", "setor")
     search_fields = ("user__username", "user__first_name", "user__last_name", "nome_funcao")
-    autocomplete_fields = ("user", "secretaria", "setor")
+    autocomplete_fields = ("user", "secretaria", "orgao", "setor")
     ordering = ("user__username", "nome_funcao")

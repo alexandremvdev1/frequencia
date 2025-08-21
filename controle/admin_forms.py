@@ -1,13 +1,13 @@
 # controle/admin_forms.py
 from django import forms
 from .models import (
-    Prefeitura, Secretaria, Escola, Setor, NivelAcesso
+    Prefeitura, Secretaria, Orgao, Setor, NivelAcesso
 )
 
 ESCOPO_CHOICES = [
     ("prefeitura", "Prefeitura"),
     ("secretaria", "Secretaria"),
-    ("escola", "Escola / Unidade"),
+    ("escola", "Órgão / Unidade"),   # mantém a CHAVE "escola" para compatibilidade dos posts
     ("setor", "Setor"),
 ]
 
@@ -20,31 +20,26 @@ class ConcederAcessoForm(forms.Form):
         queryset=Prefeitura.objects.all(), required=False, label="Prefeitura"
     )
     secretaria = forms.ModelChoiceField(
-        queryset=Secretaria.objects.select_related("prefeitura"), required=False, label="Secretaria"
+        queryset=Secretaria.objects.select_related("prefeitura"),
+        required=False, label="Secretaria"
     )
+    # Campo segue se chamando "escola" por compatibilidade, mas é Orgao
     escola = forms.ModelChoiceField(
-        queryset=Escola.objects.select_related("secretaria__prefeitura"), required=False, label="Escola/Unidade"
+        queryset=Orgao.objects.select_related("secretaria", "secretaria__prefeitura"),
+        required=False, label="Órgão/Unidade"
     )
     setor = forms.ModelChoiceField(
-        queryset=Setor.objects.select_related(
-            "departamento",
-            "departamento__escola",
-            "departamento__secretaria",
-            "departamento__prefeitura",
-            "secretaria",
-        ),
-        required=False,
-        label="Setor",
+        queryset=Setor.objects.select_related("orgao", "secretaria", "secretaria__prefeitura").order_by("nome"),
+        required=False, label="Setor",
     )
 
     def clean(self):
         cleaned = super().clean()
         escopo = cleaned.get("escopo")
-        # Exige exatamente um alvo de acordo com o escopo
         need = {
             "prefeitura": "prefeitura",
             "secretaria": "secretaria",
-            "escola": "escola",
+            "escola": "escola",   # continua "escola" (mas é Orgao)
             "setor": "setor",
         }[escopo]
         if not cleaned.get(need):
@@ -59,21 +54,17 @@ class RevogarAcessoForm(forms.Form):
         queryset=Prefeitura.objects.all(), required=False, label="Prefeitura"
     )
     secretaria = forms.ModelChoiceField(
-        queryset=Secretaria.objects.select_related("prefeitura"), required=False, label="Secretaria"
+        queryset=Secretaria.objects.select_related("prefeitura"),
+        required=False, label="Secretaria"
     )
+    # idem: campo "escola" aponta para Orgao
     escola = forms.ModelChoiceField(
-        queryset=Escola.objects.select_related("secretaria__prefeitura"), required=False, label="Escola/Unidade"
+        queryset=Orgao.objects.select_related("secretaria", "secretaria__prefeitura"),
+        required=False, label="Órgão/Unidade"
     )
     setor = forms.ModelChoiceField(
-        queryset=Setor.objects.select_related(
-            "departamento",
-            "departamento__escola",
-            "departamento__secretaria",
-            "departamento__prefeitura",
-            "secretaria",
-        ),
-        required=False,
-        label="Setor",
+        queryset=Setor.objects.select_related("orgao", "secretaria", "secretaria__prefeitura").order_by("nome"),
+        required=False, label="Setor",
     )
 
     def clean(self):
