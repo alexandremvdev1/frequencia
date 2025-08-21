@@ -140,6 +140,9 @@ ASGI_APPLICATION = "frequencia.asgi.application"
 # =========================
 # Banco de Dados
 # =========================
+# =========================
+# Banco de Dados
+# =========================
 import dj_database_url  # type: ignore
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -147,9 +150,18 @@ if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.parse(
             DATABASE_URL,
-            conn_max_age=600,
-            ssl_require=True,  # força TLS mesmo sem ?sslmode=require
+            conn_max_age=600,      # mantém conexões abertas (bom p/ pooler)
+            conn_health_checks=True,  # <--- ADICIONE ESTA LINHA
+            ssl_require=True,      # força TLS mesmo sem ?sslmode=require
         )
+    }
+    # Pooler (pgbouncer) do Neon: evite server-side cursors
+    DISABLE_SERVER_SIDE_CURSORS = True  # <--- ADICIONE ESTA LINHA
+
+    # (Opcional) Deixar ssl explícito também em OPTIONS
+    DATABASES["default"]["OPTIONS"] = {
+        **DATABASES["default"].get("OPTIONS", {}),
+        "sslmode": "require",
     }
 else:
     DATABASES = {
