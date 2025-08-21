@@ -63,6 +63,15 @@ class Orgao(models.Model):
     email = models.EmailField(blank=True, null=True)
     logo = CloudinaryField('Logo do órgão', blank=True, null=True)
 
+    # >>> novos campos de endereço
+    endereco = models.CharField("Endereço", max_length=255, blank=True, null=True)
+    numero = models.CharField("Número", max_length=20, blank=True, null=True)
+    bairro = models.CharField("Bairro", max_length=100, blank=True, null=True)
+    cep = models.CharField("CEP", max_length=10, blank=True, null=True)
+    cidade = models.CharField(max_length=100, blank=True, null=True)
+    uf = models.CharField(max_length=2, blank=True, null=True)
+
+
     class Meta:
         unique_together = ('secretaria', 'nome')
         verbose_name = "Órgão vinculado"

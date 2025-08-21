@@ -84,12 +84,24 @@ class SecretariaAdmin(admin.ModelAdmin):
 
 @admin.register(Orgao)
 class OrgaoAdmin(admin.ModelAdmin):
-    list_display = ("nome", "secretaria", "cnpj", "telefone", "email")
+    list_display = ("nome", "secretaria", "cnpj", "telefone", "email", "endereco_resumido")
     list_filter = ("secretaria", "secretaria__prefeitura")
     search_fields = ("nome", "cnpj", "email", "telefone", "secretaria__nome", "secretaria__prefeitura__nome")
     ordering = ("secretaria__prefeitura__nome", "secretaria__nome", "nome")
     list_select_related = ("secretaria", "secretaria__prefeitura")
     list_per_page = 25
+
+    fieldsets = (
+        (None, {"fields": ("nome", "secretaria", "cnpj", ("telefone", "email"), "logo")}),
+        ("Endereço", {"fields": ("endereco", ("numero", "bairro"), "cep")}),
+    )
+
+    def endereco_resumido(self, obj):
+        pedacos = [obj.endereco or "", obj.numero or "", obj.bairro or "", obj.cep or ""]
+        txt = " - ".join([p for p in pedacos if p])
+        return txt or "-"
+    endereco_resumido.short_description = "Endereço"
+
 
 
 # =========================
