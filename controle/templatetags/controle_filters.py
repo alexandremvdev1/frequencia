@@ -421,3 +421,14 @@ def date_br(value, fmt="%d/%m/%Y"):
         return value.strftime(fmt) if value else ""
     except Exception:
         return value
+
+@register.filter(name="get_item")
+def get_item(mapping, key):
+    """
+    Retorna mapping[key] com fallback seguro.
+    Suporta dicionários com chave date, int, str etc.
+    """
+    try:
+        return mapping.get(key, [])
+    except AttributeError:
+        return []

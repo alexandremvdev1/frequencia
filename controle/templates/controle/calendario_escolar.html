@@ -1,0 +1,257 @@
+{% load static %}
+{% load controle_filters %}
+{% load custom_filters %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Calendário Escolar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer"/>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}"/>
+
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --g1:#0b1020; --g2:#111a3a; --border:#e5e7eb; --bg:#f6f8fb; --base-font:14px; }
+    html{ font-size: var(--base-font); } body{ background:var(--bg); color:var(--ink); }
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); } .navbar-brand{ font-size:1rem; }
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+
+    /* ===== Calendário ===== */
+    .calendar-grid{ display:grid; grid-template-columns: repeat(7,1fr); gap:6px; }
+    .cal-head{ font-size:.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.04em; text-align:center; }
+    .day{
+      background:#fff; border:1px solid var(--border); border-radius:.5rem;
+      min-height:92px; padding:6px; display:flex; flex-direction:column; gap:4px;
+      transition: box-shadow .08s ease, transform .08s ease;
+    }
+    .day:hover{ box-shadow:0 4px 14px rgba(17,24,39,.08); transform: translateY(-1px); }
+    .day.out{ opacity:.55; background:#fafafa; }
+    .day .num{ font-size:.8rem; font-weight:700; color:#0f172a; }
+    .evt{ font-size:.7rem; line-height:1.1; border-radius:.35rem; padding:2px 4px; border:1px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* Badge de dias letivos */
+    .badge-letivos{ background:#e0f2fe; border:1px solid #93c5fd; color:#0f172a; font-weight:600; padding:.15rem .4rem; border-radius:.35rem; font-size:.75rem; }
+
+    /* Cores dos chips (linhas individuais) */
+    .evt-PLANEJAMENTO{ background:#fef3c7; border-color:#fde68a; }
+    .evt-FERIADO{ background:#fee2e2; border-color:#fecaca; }
+    .evt-RECESSO{ background:#e9d5ff; border-color:#d8b4fe; }
+    .evt-REUNIAO{ background:#d1fae5; border-color:#a7f3d0; }
+    .evt-AVALIACAO{ background:#dbeafe; border-color:#bfdbfe; }
+    .evt-AULA{ background:#f1f5f9; border-color:#e2e8f0; }
+    .evt-OUTRO{ background:#f5f5f5; border-color:#e5e5e5; }
+    .evt-MATRICULAS{ background:#e0f2fe; border-color:#bae6fd; }
+    .evt-AULA_INAUGURAL{ background:#dcfce7; border-color:#bbf7d0; }
+    .evt-INICIO_BIMESTRE{ background:#f1f5f9; border-color:#e2e8f0; }
+    .evt-CONSELHO_PEDAGOGICO{ background:#fde68a; border-color:#fcd34d; }
+    .evt-PPP_AVALIACAO{ background:#fef9c3; border-color:#fde68a; }
+    .evt-FORMACAO_TURMAS{ background:#e9d5ff; border-color:#d8b4fe; }
+    .evt-FORMATURAS{ background:#fae8ff; border-color:#f5d0fe; }
+    .evt-AVALIACAO_DIAGNOSTICA{ background:#dbeafe; border-color:#bfdbfe; }
+    .evt-RECUPERACOES_FINAIS{ background:#fee2e2; border-color:#fecaca; }
+    .evt-SAETO{ background:#ffedd5; border-color:#fed7aa; }
+    .evt-INDEPENDENCIA_BRASIL{ background:#d1fae5; border-color:#a7f3d0; }
+    .evt-FORMACOES_CONTINUADAS{ background:#f3e8ff; border-color:#e9d5ff; }
+    .evt-NAO_LETIVO{ background:#f5f5f5; border-color:#e5e5e5; }
+
+    /* Cores na CÉLULA inteira (1º evento do dia) */
+    .daycat-PLANEJAMENTO{ background:#fff7e6; border-color:#fde68a; }
+    .daycat-FERIADO{ background:#fff1f2; border-color:#fecaca; }
+    .daycat-RECESSO{ background:#f6f0ff; border-color:#d8b4fe; }
+    .daycat-REUNIAO{ background:#edfff7; border-color:#a7f3d0; }
+    .daycat-AVALIACAO{ background:#eff6ff; border-color:#bfdbfe; }
+    .daycat-AULA{ background:#f8fafc; border-color:#e2e8f0; }
+    .daycat-OUTRO{ background:#fafafa; border-color:#e5e5e5; }
+    .daycat-MATRICULAS{ background:#f0f9ff; border-color:#bae6fd; }
+    .daycat-AULA_INAUGURAL{ background:#f0fdf4; border-color:#bbf7d0; }
+    .daycat-INICIO_BIMESTRE{ background:#f8fafc; border-color:#e2e8f0; }
+    .daycat-CONSELHO_PEDAGOGICO{ background:#fffbeb; border-color:#fcd34d; }
+    .daycat-PPP_AVALIACAO{ background:#fffee7; border-color:#fde68a; }
+    .daycat-FORMACAO_TURMAS{ background:#f7ecff; border-color:#d8b4fe; }
+    .daycat-FORMATURAS{ background:#fdf4ff; border-color:#f5d0fe; }
+    .daycat-AVALIACAO_DIAGNOSTICA{ background:#eff6ff; border-color:#bfdbfe; }
+    .daycat-RECUPERACOES_FINAIS{ background:#fff1f2; border-color:#fecaca; }
+    .daycat-SAETO{ background:#fff7ed; border-color:#fed7aa; }
+    .daycat-INDEPENDENCIA_BRASIL{ background:#ecfdf5; border-color:#a7f3d0; }
+    .daycat-FORMACOES_CONTINUADAS{ background:#faf5ff; border-color:#e9d5ff; }
+    .daycat-NAO_LETIVO{ background:#f5f5f5; border-color:#e5e5e5; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:painel_controle' %}">← Voltar</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+  <!-- Cabeçalho + Filtros/Navegação -->
+  <div class="card card-clean p-3 mb-3">
+    <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
+      <h1 class="h5 m-0 d-flex align-items-center gap-2">
+        <i class="fa-solid fa-calendar-days"></i>
+        <span>Calendário Escolar — {{ mes_nome }} / {{ ano }}</span>
+        {% if letivos_mes is not None %}
+          <span class="badge-letivos">{{ letivos_mes }} dia{% if letivos_mes|add:'-1' %}s{% endif %} letivo{% if letivos_mes|add:'-1' %}s{% endif %}</span>
+        {% endif %}
+      </h1>
+
+      <form method="get" class="d-flex gap-2">
+        <input type="hidden" name="mes" value="{{ mes }}">
+        <input type="hidden" name="ano" value="{{ ano }}">
+        <select name="orgao" class="form-select form-select-sm" style="min-width:260px">
+          <option value="">— Todas as unidades (geral) —</option>
+          {% for o in orgaos %}
+            <option value="{{ o.id }}" {% if orgao and orgao.id == o.id %}selected{% endif %}>{{ o.nome }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm btn-primary" type="submit"><i class="fa-solid fa-filter me-1"></i>Filtrar</button>
+      </form>
+
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-secondary" href="?ano={{ prev_y }}&mes={{ prev_m }}{% if orgao %}&orgao={{ orgao.id }}{% endif %}">« Mês anterior</a>
+        <a class="btn btn-sm btn-outline-secondary" href="?ano={{ next_y }}&mes={{ next_m }}{% if orgao %}&orgao={{ orgao.id }}{% endif %}">Próximo mês »</a>
+        <a class="btn btn-sm btn-outline-dark" href="{% url 'controle:calendario_escolar' %}{% if orgao %}?orgao={{ orgao.id }}{% endif %}">Hoje</a>
+        <a class="btn btn-sm btn-outline-warning"
+           href="{% url 'controle:calendario_impressao' %}?ano={{ ano }}{% if orgao %}&orgao={{ orgao.id }}{% endif %}"
+           target="_blank" rel="noopener">
+          <i class="fa-solid fa-print me-1"></i> Imprimir ano
+        </a>
+      </div>
+    </div>
+
+    {% if messages %}
+      <div class="mt-2">
+        {% for m in messages %}<div class="alert alert-{{ m.tags }} py-2 mb-2">{{ m }}</div>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Formulário de novo evento -->
+  <div class="card card-clean p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 m-0"><i class="fa-solid fa-plus me-1"></i>Novo evento</h2>
+    </div>
+    <form method="post" class="row g-2">
+      {% csrf_token %}
+      <div class="col-12 col-md-4">
+        <label class="form-label">Título</label>
+        {{ form.titulo }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Categoria</label>
+        {{ form.categoria }}
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label">Início</label>
+        {{ form.data_inicio }}
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label">Fim</label>
+        {{ form.data_fim }}
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Unidade (Órgão)</label>
+        {{ form.orgao }}
+      </div>
+      <div class="col-12">
+        <label class="form-label">Descrição (opcional)</label>
+        {{ form.descricao }}
+      </div>
+      <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary"><i class="fa-solid fa-save me-1"></i>Salvar evento</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Legenda -->
+  <div class="card card-clean p-3 mb-3">
+    <div class="legend d-flex flex-wrap gap-2 align-items-center">
+      <span class="lbl me-2">Legenda:</span>
+      <span class="pill evt-PLANEJAMENTO">Planejamento</span>
+      <span class="pill evt-FERIADO">Feriado</span>
+      <span class="pill evt-RECESSO">Recesso</span>
+      <span class="pill evt-REUNIAO">Reunião</span>
+      <span class="pill evt-AVALIACAO">Avaliação</span>
+      <span class="pill evt-AULA">Aula / Sábado letivo</span>
+      <span class="pill evt-OUTRO">Outro</span>
+    </div>
+  </div>
+
+  <!-- Calendário -->
+  <div class="card card-clean p-3">
+    <div class="calendar-grid mb-2">
+      <div class="cal-head fw-semibold">Dom</div>
+      <div class="cal-head fw-semibold">Seg</div>
+      <div class="cal-head fw-semibold">Ter</div>
+      <div class="cal-head fw-semibold">Qua</div>
+      <div class="cal-head fw-semibold">Qui</div>
+      <div class="cal-head fw-semibold">Sex</div>
+      <div class="cal-head fw-semibold">Sáb</div>
+
+      {% for week in weeks %}
+        {% for d in week %}
+          {% with evs=events_by_day|get_item:d %}
+            {% if evs and evs|length %}
+              {% with cat=evs.0.categoria|default:'OUTRO' %}
+                <div class="day daycat-{{ cat }} {% if d|date:'n' != mes|stringformat:'s' %}out{% endif %}"
+                     {% if evs %}
+                       data-bs-toggle="tooltip" data-bs-html="true"
+                       data-bs-title="{% for e in evs %}• {{ e.titulo }}{% if not forloop.last %}<br>{% endif %}{% endfor %}"
+                     {% endif %}>
+                  <div class="num">{{ d.day }}</div>
+                  <div class="flex-grow-1 d-flex flex-column gap-1">
+                    {% for e in evs %}
+                      <div class="evt evt-{{ e.categoria|default:'OUTRO' }}">
+                        {{ e.titulo }}
+                        {% if e.pk %}
+                          <a class="text-danger text-decoration-none ms-1" title="Excluir"
+                             href="{% url 'controle:calendario_excluir' e.pk %}"
+                             onclick="return confirm('Excluir este evento?');">
+                            <i class="fa-solid fa-xmark"></i>
+                          </a>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endwith %}
+            {% else %}
+              <div class="day {% if d|date:'n' != mes|stringformat:'s' %}out{% endif %}">
+                <div class="num">{{ d.day }}</div>
+                <div class="flex-grow-1"></div>
+              </div>
+            {% endif %}
+          {% endwith %}
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</main>
+
+<!-- Bootstrap JS (tooltips) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+      .map(el => new bootstrap.Tooltip(el));
+    const map = { INPUT:'form-control', SELECT:'form-select', TEXTAREA:'form-control' };
+    document.querySelectorAll('input, select, textarea').forEach(el=>{
+      const tp=(el.getAttribute('type')||'').toLowerCase();
+      if(tp==='checkbox') el.classList.add('form-check-input');
+      else el.classList.add(map[el.tagName]||'form-control');
+    });
+    document.querySelectorAll('label').forEach(l=>l.classList.add('form-label'));
+  });
+</script>
+
+</body>
+</html>

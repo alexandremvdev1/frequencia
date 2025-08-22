@@ -994,13 +994,35 @@ def excluir_feriado(request, feriado_id):
 # Painel
 # =====================================================================
 
+MESES_PT = [
+    "", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+]
+
+def _norm(s: str) -> str:
+    if s is None:
+        return ""
+    s = unicodedata.normalize("NFKD", str(s))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.strip().lower()
+
+
 @login_required
 def painel_controle(request):
     hoje_date = timezone.localdate()
     agora = timezone.now()
 
-    funcionarios_count = filter_funcionarios_by_scope(Funcionario.objects.all(), request.user).count()
-    horarios_count = filter_horarios_by_scope(HorarioTrabalho.objects.all(), request.user).count()
+    # =======================
+    # KPIs
+    # =======================
+    funcionarios_count = filter_funcionarios_by_scope(
+        Funcionario.objects.all(), request.user
+    ).count()
+
+    horarios_count = filter_horarios_by_scope(
+        HorarioTrabalho.objects.all(), request.user
+    ).count()
+
     feriados_count = Feriado.objects.count()
 
     cutoff = agora - timedelta(days=30)
@@ -1021,6 +1043,57 @@ def painel_controle(request):
         request.user
     )
 
+    # =======================
+    # Calendário do mês atual
+    # =======================
+    ano = hoje_date.year
+    mes = hoje_date.month
+    # domingo como primeiro dia (0=segunda ... 6=domingo)
+    cal = calendar.Calendar(firstweekday=6)
+    cal_weeks = cal.monthdatescalendar(ano, mes)
+
+    # limites do mês
+    first_day = date(ano, mes, 1)
+    last_day = date(ano, mes, calendar.monthrange(ano, mes)[1])
+
+    # dicionário data -> lista de eventos (cada evento é dict {'titulo','categoria'})
+    cal_events_by_day = {}
+    for week in cal_weeks:
+        for d in week:
+            cal_events_by_day.setdefault(d, [])
+
+    def _add_evt(d, titulo, categoria):
+        cal_events_by_day.setdefault(d, []).append({
+            "titulo": titulo,
+            "categoria": (categoria or "OUTRO").upper()
+        })
+
+    # 1) Eventos do Calendário Escolar (se o modelo existir)
+    try:
+        from .models import CalendarioEvento  # caso ainda não tenha criado, apenas ignora
+        eventos_qs = CalendarioEvento.objects.filter(
+            data_inicio__lte=last_day,
+            data_fim__gte=first_day
+        ).only("titulo", "categoria", "data_inicio", "data_fim")
+    except Exception:
+        eventos_qs = []
+
+    for e in eventos_qs:
+        d = max(e.data_inicio, first_day)
+        fim = min(e.data_fim, last_day)
+        while d <= fim:
+            _add_evt(d, e.titulo, e.categoria)
+            d += timedelta(days=1)
+
+    # 2) Feriados
+    for f in Feriado.objects.filter(data__range=(first_day, last_day)):
+        _add_evt(f.data, f"FERIADO — {f.descricao}", "FERIADO")
+
+    # 3) Sábados letivos
+    for s in SabadoLetivo.objects.filter(data__range=(first_day, last_day)):
+        titulo = "SÁBADO LETIVO" + (f" — {s.descricao}" if getattr(s, "descricao", None) else "")
+        _add_evt(s.data, titulo, "AULA")
+
     context = {
         'funcionarios_count': funcionarios_count,
         'horarios_count': horarios_count,
@@ -1028,19 +1101,15 @@ def painel_controle(request):
         'folhas_30d_q': folhas_30d_q,
         'aniversariantes_mes': aniversariantes_mes,
         'aniversariantes_dia': aniversariantes_dia,
+
+        # calendário (para o card no painel)
+        'cal_weeks': cal_weeks,
+        'cal_events_by_day': cal_events_by_day,
+        'cal_mes_nome': MESES_PT[mes],
+        'cal_mes_num': mes,
+        'cal_ano': ano,
     }
     return render(request, 'controle/painel_controle.html', context)
-
-# =====================================================================
-# Importações
-# =====================================================================
-
-def _norm(s: str) -> str:
-    if s is None:
-        return ""
-    s = unicodedata.normalize("NFKD", str(s))
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return s.strip().lower()
 
 @login_required
 def importar_funcionarios(request):
@@ -2276,3 +2345,328 @@ def sabados_letivos(request):
 
     sabados = SabadoLetivo.objects.all().order_by('data')
     return render(request, 'controle/sabados_letivos.html', {'sabados': sabados})
+
+# controle/views.py
+from collections import defaultdict, namedtuple
+import calendar
+from datetime import date, timedelta
+
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db.models import Q, Case, When, IntegerField
+from django.shortcuts import render, redirect, get_object_or_404
+from django.utils import timezone
+
+from .forms import CalendarioEventoForm
+from .models import CalendarioEvento, Feriado, SabadoLetivo, Orgao
+
+# ======================== Configurações & utilidades =========================
+
+# Ordem para decidir a cor da CÉLULA (menor índice = maior prioridade)
+_CATEGORIA_PRIORIDADE = [
+    "FERIADO", "RECESSO", "NAO_LETIVO",
+    "SAETO", "AVALIACAO", "AVALIACAO_DIAGNOSTICA", "RECUPERACOES_FINAIS",
+    "CONSELHO_PEDAGOGICO", "PPP_AVALIACAO", "FORMACAO_TURMAS", "FORMATURAS",
+    "MATRICULAS", "AULA_INAUGURAL", "INICIO_BIMESTRE", "FORMACOES_CONTINUADAS",
+    "AULA", "REUNIAO", "PLANEJAMENTO",
+    # ↓ prioridade baixa, não “pinta” por cima de não-letivos/avaliações
+    "DATAS_COMEMORATIVAS",
+    "INDEPENDENCIA_BRASIL", "OUTRO",
+]
+_PRI = {cat: i for i, cat in enumerate(_CATEGORIA_PRIORIDADE)}
+
+DisplayEvent = namedtuple("DisplayEvent", "titulo categoria pk")
+
+PT_MESES = [
+    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+]
+
+def _month_weeks(y: int, m: int):
+    """Matriz de semanas (domingo como primeiro dia)."""
+    cal = calendar.Calendar(firstweekday=6)  # 6=domingo
+    return cal.monthdatescalendar(y, m)
+
+def _month_bounds(y: int, m: int):
+    first = date(y, m, 1)
+    last = date(y, m, calendar.monthrange(y, m)[1])
+    return first, last
+
+def _daterange(start: date, end: date):
+    cur = start
+    while cur <= end:
+        yield cur
+        cur += timedelta(days=1)
+
+# ========================= Mapa de eventos por dia (mês) =====================
+
+def _events_map_for_month(y: int, m: int, orgao: Orgao | None = None):
+    """
+    Retorna (weeks, events_by_day) para o mês informado.
+    Une: CalendarioEvento + Feriado + SabadoLetivo (como AULA).
+    Aplica prioridade para facilitar a cor da célula.
+    """
+    first, last = _month_bounds(y, m)
+    weeks = _month_weeks(y, m)
+    ev_map: dict[date, list] = defaultdict(list)
+
+    # Eventos (globais e/ou por órgão)
+    ce_qs = (
+        CalendarioEvento.objects
+        .filter(Q(data_inicio__lte=last) & Q(data_fim__gte=first))
+        .order_by("data_inicio", "titulo")
+        .select_related("orgao")
+    )
+    if orgao:
+        ce_qs = ce_qs.filter(Q(orgao__isnull=True) | Q(orgao=orgao))
+
+    for ev in ce_qs:
+        span_ini = max(ev.data_inicio, first)
+        span_fim = min(ev.data_fim, last)
+        for d in _daterange(span_ini, span_fim):
+            ev_map[d].append(ev)
+
+    # Feriados (injetados)
+    for f in Feriado.objects.filter(data__range=(first, last)).order_by("data"):
+        ev_map[f.data].append(
+            DisplayEvent(titulo=f"Feriado — {f.descricao}", categoria="FERIADO", pk=None)
+        )
+
+    # Sábados letivos (injetados como AULA)
+    for s in SabadoLetivo.objects.filter(data__range=(first, last)).order_by("data"):
+        if s.data.weekday() == 5:  # sábado
+            ev_map[s.data].append(
+                DisplayEvent(titulo="Sábado Letivo", categoria="AULA", pk=None)
+            )
+
+    # Prioridade para definir a cor
+    for k, lst in ev_map.items():
+        ev_map[k] = sorted(lst, key=lambda e: _PRI.get(getattr(e, "categoria", "OUTRO"), 999))
+
+    return weeks, dict(ev_map)
+
+# ========================= Cálculo de dias letivos ===========================
+
+def _dias_letivos_do_mes(y: int, m: int, events_by_day: dict) -> int:
+    """
+    Regras:
+      - Seg–Sex são letivos, EXCETO se houver FERIADO/RECESSO/NAO_LETIVO.
+      - Sábado conta apenas se marcado como letivo (AULA/AULA_INAUGURAL ou SabadoLetivo).
+      - Domingo não conta.
+    """
+    first, last = _month_bounds(y, m)
+
+    feriados_model = set(
+        Feriado.objects.filter(data__range=(first, last)).values_list("data", flat=True)
+    )
+    nao_letivo_cats = {"FERIADO", "RECESSO", "NAO_LETIVO"}
+    feriados_eventos = {
+        d for d, evs in events_by_day.items()
+        if any(getattr(e, "categoria", "") in nao_letivo_cats for e in evs)
+    }
+    feriados = feriados_model | feriados_eventos
+
+    sabados_tabela = set(
+        SabadoLetivo.objects.filter(data__range=(first, last)).values_list("data", flat=True)
+    )
+
+    letivos = 0
+    for d in _daterange(first, last):
+        wd = d.weekday()  # 0=seg ... 6=dom
+        if wd <= 4:  # seg-sex
+            if d not in feriados:
+                letivos += 1
+        elif wd == 5:  # sábado
+            marcado_evento = any(
+                getattr(e, "categoria", "") in {"AULA", "AULA_INAUGURAL"} for e in events_by_day.get(d, [])
+            )
+            if (marcado_evento or d in sabados_tabela) and d not in feriados:
+                letivos += 1
+        # domingo: ignora
+    return letivos
+
+# =======================  Calendário (mensal) + cadastro  ====================
+
+@login_required
+def calendario_escolar(request):
+    today = timezone.localdate()
+    ano = int(request.GET.get("ano", today.year))
+    mes = int(request.GET.get("mes", today.month))
+    orgao_id = request.GET.get("orgao") or None
+    orgao = get_object_or_404(Orgao, pk=orgao_id) if orgao_id else None
+
+    # POST: criar evento
+    if request.method == "POST":
+        form = CalendarioEventoForm(request.POST)
+        if form.is_valid():
+            ev = form.save()
+            messages.success(request, "Evento salvo com sucesso.")
+            url = f"{request.path}?ano={ev.data_inicio.year}&mes={ev.data_inicio.month}"
+            if ev.orgao_id:
+                url += f"&orgao={ev.orgao_id}"
+            return redirect(url)
+        messages.error(request, "Corrija os campos destacados.")
+    else:
+        form = CalendarioEventoForm()
+
+    # Dados do mês
+    weeks, events_by_day = _events_map_for_month(ano, mes, orgao=orgao)
+    letivos_mes = _dias_letivos_do_mes(ano, mes, events_by_day)
+
+    # Navegação
+    prev_y, prev_m = (ano - 1, 12) if mes == 1 else (ano, mes - 1)
+    next_y, next_m = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
+
+    orgaos = Orgao.objects.all().order_by(
+        "secretaria__prefeitura__nome", "secretaria__nome", "nome"
+    )
+
+    context = {
+        "now": timezone.now(),
+        "ano": ano,
+        "mes": mes,
+        "mes_nome": calendar.month_name[mes].capitalize(),
+        "prev_m": prev_m, "prev_y": prev_y,
+        "next_m": next_m, "next_y": next_y,
+        "orgao": orgao,
+        "orgaos": orgaos,
+        "weeks": weeks,
+        "events_by_day": events_by_day,
+        "letivos_mes": letivos_mes,
+        "form": form,
+    }
+    return render(request, "controle/calendario_escolar.html", context)
+
+@login_required
+def calendario_excluir(request, pk: int):
+    ev = get_object_or_404(CalendarioEvento, pk=pk)
+    ano = ev.data_inicio.year
+    mes = ev.data_inicio.month
+    orgao_id = ev.orgao_id
+    ev.delete()
+    messages.success(request, "Evento excluído.")
+    url = f"{redirect('controle:calendario_escolar').url}?ano={ano}&mes={mes}"
+    if orgao_id:
+        url += f"&orgao={orgao_id}"
+    return redirect(url)
+
+# =============================  Impressão (12 meses) =========================
+
+@login_required
+def calendario_impressao(request):
+    today = timezone.localdate()
+    ano = int(request.GET.get("ano", today.year))
+    orgao_id = request.GET.get("orgao") or None
+    orgao = get_object_or_404(Orgao, pk=orgao_id) if orgao_id else None
+
+    # ===== Grids mensais (domingo como primeiro dia) =====
+    cal = calendar.Calendar(firstweekday=6)
+    meses = []
+    for m in range(1, 13):
+        weeks, wk = [], []
+        for d in cal.itermonthdates(ano, m):
+            wk.append(d)
+            if len(wk) == 7:
+                weeks.append(wk)
+                wk = []
+        meses.append({
+            "nome": PT_MESES[m-1],
+            "month_num": m,
+            "year": ano,
+            "weeks": weeks,
+        })
+
+    # ===== Eventos do ano (globais + órgão) =====
+    ano_ini, ano_fim = date(ano, 1, 1), date(ano, 12, 31)
+    ev_qs = (CalendarioEvento.objects
+             .filter(data_inicio__lte=ano_fim, data_fim__gte=ano_ini)
+             .select_related('orgao'))
+
+    if orgao:
+        ev_qs = ev_qs.filter(Q(orgao=orgao) | Q(orgao__isnull=True))
+
+    prioridade = Case(
+        When(categoria='FERIADO', then=0),
+        When(categoria='RECESSO', then=1),
+        When(categoria='AULA', then=2),
+        default=9,
+        output_field=IntegerField(),
+    )
+    ev_qs = ev_qs.order_by('data_inicio', prioridade, 'titulo')
+
+    # ===== Mapa de eventos por dia (apenas DIAS DO MÊS) =====
+    events_by_day: dict[date, list] = {}
+
+    # Cria chaves apenas para dias que pertencem ao mês do card
+    for m in meses:
+        for week in m["weeks"]:
+            for d in week:
+                if d.month == m["month_num"]:
+                    events_by_day.setdefault(d, [])
+
+    # Preenche com eventos (apenas se o dia está no mês correspondente)
+    for ev in ev_qs:
+        s = max(ev.data_inicio, ano_ini)
+        f = min(ev.data_fim, ano_fim)
+        cur = s
+        while cur <= f:
+            if cur in events_by_day:          # só dias do mês
+                events_by_day[cur].append(ev)
+            cur += timedelta(days=1)
+
+    # Injeta feriados
+    for f in Feriado.objects.filter(data__range=(ano_ini, ano_fim)).order_by('data'):
+        if f.data in events_by_day:
+            events_by_day[f.data].append(
+                DisplayEvent(titulo=f"Feriado — {f.descricao}", categoria="FERIADO", pk=None)
+            )
+
+    # Injeta sábados letivos (como AULA)
+    for s in SabadoLetivo.objects.filter(data__range=(ano_ini, ano_fim)).order_by('data'):
+        if s.data in events_by_day and s.data.weekday() == 5:
+            events_by_day[s.data].append(
+                DisplayEvent(titulo="Sábado Letivo", categoria="AULA", pk=None)
+            )
+
+    # Ordena por prioridade (para a cor da célula no template)
+    for k, lst in events_by_day.items():
+        events_by_day[k] = sorted(lst, key=lambda e: _PRI.get(getattr(e, "categoria", "OUTRO"), 999))
+
+    # ===== Dias letivos por mês (e total anual) =====
+    for m in meses:
+        local_map = {
+            d: events_by_day.get(d, [])
+            for w in m["weeks"] for d in w
+            if d.month == m["month_num"]          # só dias do mês
+        }
+        m["letivos"] = _dias_letivos_do_mes(m["year"], m["month_num"], local_map)
+
+    letivos_total_ano = sum(m["letivos"] for m in meses)
+
+    # ===== Listas para as seções "Datas comemorativas" e "Eventos" =====
+    eventos_lista = (CalendarioEvento.objects
+                     .filter(Q(data_inicio__year=ano) | Q(data_fim__year=ano))
+                     .order_by("data_inicio", "titulo")
+                     .select_related("orgao"))
+    if orgao:
+        eventos_lista = eventos_lista.filter(Q(orgao=orgao) | Q(orgao__isnull=True))
+
+    datas_comemorativas = eventos_lista.filter(categoria="DATAS_COMEMORATIVAS")
+    eventos_regulares = eventos_lista.exclude(categoria="DATAS_COMEMORATIVAS")
+
+    # OBS: nomes e logos são fixos no template (estáticos), não passamos prefeitura/secretaria aqui.
+    context = {
+        "ano": ano,
+        "orgao": orgao,
+        "meses": meses,
+        "events_by_day": events_by_day,
+        "letivos_total_ano": letivos_total_ano,
+        "datas_comemorativas": datas_comemorativas,
+        "eventos_regulares": eventos_regulares,
+    }
+    return render(request, "controle/calendario_impressao.html", context)
+
+
+
+
+ 

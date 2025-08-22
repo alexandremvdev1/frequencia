@@ -1,0 +1,226 @@
+{% load static %}
+{% load custom_filters %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Calendário Escolar – {{ ano }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    @page { size: A4 portrait; margin: 8mm; }
+    @media print { .no-print{display:none!important} body{-webkit-print-color-adjust:exact;print-color-adjust:exact} a{color:inherit;text-decoration:none} }
+    :root{ --ink:#0f172a; --muted:#6b7280; --border:#cbd5e1; --bg:#fff; --font:8px; --cell-h:22px; --radius:4px; --gap:4px; }
+    html,body{ background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif }
+    html{ font-size:var(--font); line-height:1.15 }
+    h1,h2,h3{ margin:0 }
+
+    /* ====== MASTHEAD (logos + nomes) ====== */
+    .masthead{
+      display:grid; grid-template-columns:64px 1fr 64px; align-items:center; gap:8px;
+      margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border);
+    }
+    .brand-logo{
+      width:64px; height:64px; object-fit:contain; image-rendering:-webkit-optimize-contrast;
+    }
+    .names{ text-align:center; }
+    .names .prefeitura{ font-weight:800; text-transform:uppercase; font-size:11px; }
+    .names .secretaria{ font-weight:700; font-size:10px; color:var(--ink); }
+    .names .unidade{ font-size:9px; color:var(--muted); }
+    .names .cal-ano{ font-size:10px; font-weight:700; margin-top:2px; }
+
+    .toolbar{ display:flex; justify-content:space-between; align-items:center; margin:6px 0 }
+    .title{ font-weight:700; font-size:11px } .subtitle{ color:var(--muted); font-size:9px }
+    .btn-print{ padding:5px 8px; border:1px solid #111827; border-radius:5px; background:#111827; color:#fff; font-size:9px }
+
+    .months{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--gap) }
+    .month{ border:.6px solid var(--border); border-radius:var(--radius); padding:4px; page-break-inside:avoid }
+    .month-name{ font-weight:700; margin-bottom:2px; font-size:9px; display:flex; justify-content:space-between; align-items:center; gap:6px }
+    .letivos-inline{ font-weight:700; color:#0f172a }
+
+    .dow{ display:grid; grid-template-columns:repeat(7,1fr); gap:1px; margin-bottom:1px }
+    .dow div{ text-align:center; color:var(--muted); font-weight:700; font-size:7px }
+    .cal{ display:grid; grid-template-columns:repeat(7,1fr); gap:1px }
+    .day{ position:relative; border:.6px solid var(--border); border-radius:3px; height:var(--cell-h); background:#fff; overflow:hidden }
+    /* fora do mês: célula vazia, sem borda/numeração/cor */
+    .day.out{ background:transparent; border:0; opacity:1 }
+    .num{ position:absolute; top:1px; right:3px; font-weight:800; font-size:8px; color:#0f172a }
+
+    /* cores (célula) */
+    .daycat-PLANEJAMENTO{ background:#fde68a!important; border-color:#f59e0b!important }
+    .daycat-FERIADO{ background:#fecaca!important; border-color:#ef4444!important }
+    .daycat-RECESSO{ background:#e9d5ff!important; border-color:#8b5cf6!important }
+    .daycat-REUNIAO{ background:#bbf7d0!important; border-color:#10b981!important }
+    .daycat-AVALIACAO{ background:#bfdbfe!important; border-color:#3b82f6!important }
+    .daycat-AULA{ background:#e5e7eb!important; border-color:#6b7280!important }
+    .daycat-OUTRO{ background:#f3f4f6!important; border-color:#9ca3af!important }
+    .daycat-MATRICULAS{ background:#bae6fd!important; border-color:#0284c7!important }
+    .daycat-AULA_INAUGURAL{ background:#a7f3d0!important; border-color:#059669!important }
+    .daycat-INICIO_BIMESTRE{ background:#e5e7eb!important; border-color:#6b7280!important }
+    .daycat-CONSELHO_PEDAGOGICO{ background:#fcd34d!important; border-color:#d97706!important }
+    .daycat-PPP_AVALIACAO{ background:#fef08a!important; border-color:#ca8a04!important }
+    .daycat-FORMACAO_TURMAS{ background:#ddd6fe!important; border-color:#7c3aed!important }
+    .daycat-FORMATURAS{ background:#f5d0fe!important; border-color:#a21caf!important }
+    .daycat-AVALIACAO_DIAGNOSTICA{ background:#93c5fd!important; border-color:#2563eb!important }
+    .daycat-RECUPERACOES_FINAIS{ background:#fca5a5!important; border-color:#dc2626!important }
+    .daycat-SAETO{ background:#fdba74!important; border-color:#ea580c!important }
+    .daycat-INDEPENDENCIA_BRASIL{ background:#86efac!important; border-color:#16a34a!important }
+    .daycat-FORMACOES_CONTINUADAS{ background:#e9d5ff!important; border-color:#8b5cf6!important }
+    .daycat-NAO_LETIVO{ background:#e5e7eb!important; border-color:#6b7280!important }
+    .daycat-DATAS_COMEMORATIVAS{ background:#ffe4f5!important; border-color:#f472b6!important }
+
+    .legend{ display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:6px }
+    .lg-item{ display:flex; align-items:center; gap:5px; font-size:8px }
+    .sw{ width:12px; height:12px; border:.6px solid #111; border-radius:2px; display:inline-block }
+
+    .year-total{ margin:6px 0 4px 0; font-size:9px; font-weight:700 }
+
+    .events{ margin-top:6px }
+    .events h2{ font-size:10px; margin:4px 0 }
+    .evlist{ column-count:3; column-gap:10px; font-size:7.5px; line-height:1.2; list-style:none; padding:0; margin:0 }
+    .evlist li{ break-inside:avoid; margin:0 0 2px 0 }
+    .evdate{ font-weight:700 }
+    .evcat{ color:var(--muted) }
+
+    @media print{ .brand-logo{ width:48px; height:48px; } }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Cabeçalho institucional (sempre com padrão) ===== -->
+  <header class="masthead">
+    <img class="brand-logo" alt="Logo da Prefeitura" src="{% static 'img/logo_prefeitura.png' %}">
+    <div class="names">
+      <div class="prefeitura">PREFEITURA MUNICIPAL DE DARCINÓPOLIS</div>
+      <div class="secretaria">SECRETARIA MUNICIPAL DE EDUCAÇÃO</div>
+      {% if orgao %}<div class="unidade">{{ orgao.nome }}</div>{% endif %}
+      <div class="cal-ano">Calendário Escolar — {{ ano }}</div>
+    </div>
+    <img class="brand-logo" alt="Logo da Secretaria de Educação" src="{% static 'img/logo_secretaria_educacao.png' %}">
+  </header>
+
+  <!-- barra apenas na tela -->
+  <div class="toolbar no-print">
+    <div>
+      <div class="title">Calendário Escolar – {{ ano }}</div>
+      {% if orgao %}<div class="subtitle">{{ orgao.nome }}</div>{% endif %}
+    </div>
+    <div><button class="btn-print" onclick="window.print()">Imprimir</button></div>
+  </div>
+
+  <!-- 12 meses -->
+  <div class="months">
+    {% for m in meses %}
+      <section class="month">
+        <div class="month-name">
+          <span>{{ m.nome }} / {{ m.year }} — <span class="letivos-inline">{{ m.letivos|default:0 }} dia{% if m.letivos|default:0 != 1 %}s{% endif %} letivo{% if m.letivos|default:0 != 1 %}s{% endif %}</span></span>
+        </div>
+
+        <div class="dow"><div>D</div><div>S</div><div>T</div><div>Q</div><div>Q</div><div>S</div><div>S</div></div>
+
+        <div class="cal">
+          {% for week in m.weeks %}
+            {% for d in week %}
+              {% if d.month != m.month_num %}
+                <!-- Fora do mês: célula vazia -->
+                <div class="day out"></div>
+              {% else %}
+                {% with evs=events_by_day|get_item:d %}
+                  {% if evs and evs|length %}
+                    {% with cat=evs.0.categoria|default:'OUTRO' %}
+                      {% with wd=d|date:"w" %}
+                        {% if wd == "0" %}
+                          <!-- Domingo nunca pinta -->
+                          <div class="day"><span class="num">{{ d.day }}</span></div>
+                        {% elif wd == "6" and cat != "AULA" and cat != "AULA_INAUGURAL" %}
+                          <!-- Sábado só pinta se AULA/AULA_INAUGURAL -->
+                          <div class="day"><span class="num">{{ d.day }}</span></div>
+                        {% else %}
+                          <div class="day daycat-{{ cat }}"><span class="num">{{ d.day }}</span></div>
+                        {% endif %}
+                      {% endwith %}
+                    {% endwith %}
+                  {% else %}
+                    <div class="day"><span class="num">{{ d.day }}</span></div>
+                  {% endif %}
+                {% endwith %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+
+  <!-- total anual -->
+  <div class="year-total">
+    Total de dias letivos em {{ ano }}{% if orgao %} — {{ orgao.nome }}{% endif %}: {{ letivos_total_ano|default:0 }}
+  </div>
+
+  <!-- legenda -->
+  <div class="legend">
+    <div class="lg-item"><span class="sw" style="background:#fde68a;border-color:#f59e0b"></span> Planejamento</div>
+    <div class="lg-item"><span class="sw" style="background:#fecaca;border-color:#ef4444"></span> Feriado</div>
+    <div class="lg-item"><span class="sw" style="background:#e9d5ff;border-color:#8b5cf6"></span> Recesso</div>
+    <div class="lg-item"><span class="sw" style="background:#bbf7d0;border-color:#10b981"></span> Reunião</div>
+    <div class="lg-item"><span class="sw" style="background:#bfdbfe;border-color:#3b82f6"></span> Avaliação</div>
+    <div class="lg-item"><span class="sw" style="background:#e5e7eb;border-color:#6b7280"></span> Aula / Sábado letivo</div>
+    <div class="lg-item"><span class="sw" style="background:#bae6fd;border-color:#0284c7"></span> Matrículas</div>
+    <div class="lg-item"><span class="sw" style="background:#a7f3d0;border-color:#059669"></span> Aula inaugural</div>
+    <div class="lg-item"><span class="sw" style="background:#fcd34d;border-color:#d97706"></span> Conselho pedagógico</div>
+    <div class="lg-item"><span class="sw" style="background:#fef08a;border-color:#ca8a04"></span> PPP / Avaliação</div>
+    <div class="lg-item"><span class="sw" style="background:#ddd6fe;border-color:#7c3aed"></span> Formação de turmas</div>
+    <div class="lg-item"><span class="sw" style="background:#f5d0fe;border-color:#a21caf"></span> Formaturas</div>
+    <div class="lg-item"><span class="sw" style="background:#93c5fd;border-color:#2563eb"></span> Avaliação diagnóstica</div>
+    <div class="lg-item"><span class="sw" style="background:#fca5a5;border-color:#dc2626"></span> Recuperações finais</div>
+    <div class="lg-item"><span class="sw" style="background:#fdba74;border-color:#ea580c"></span> SAETO</div>
+    <div class="lg-item"><span class="sw" style="background:#86efac;border-color:#16a34a"></span> Independência do Brasil</div>
+    <div class="lg-item"><span class="sw" style="background:#e9d5ff;border-color:#8b5cf6"></span> Formações continuadas</div>
+    <div class="lg-item"><span class="sw" style="background:#f3f4f6;border-color:#9ca3af"></span> Outro / Não letivo</div>
+  </div>
+
+  <!-- datas comemorativas -->
+  <div class="events">
+    <h2>Datas comemorativas — marque na sua agenda</h2>
+    {% if datas_comemorativas %}
+      <ul class="evlist">
+        {% for e in datas_comemorativas %}
+          <li>
+            <span class="evdate">
+              {% if e.data_inicio == e.data_fim %}{{ e.data_inicio|date:"d/m" }}
+              {% else %}{{ e.data_inicio|date:"d/m" }}–{{ e.data_fim|date:"d/m" }}{% endif %}
+            </span>
+            — {{ e.titulo }}{% if not orgao %}{% if e.orgao %} — {{ e.orgao.nome }}{% else %} — Geral{% endif %}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div style="color:var(--muted);">Nenhuma data comemorativa cadastrada para {{ ano }}.</div>
+    {% endif %}
+  </div>
+
+  <!-- eventos regulares -->
+  <div class="events">
+    <h2>Eventos {{ ano }}{% if orgao %} — {{ orgao.nome }}{% endif %}</h2>
+    {% if eventos_regulares %}
+      <ul class="evlist">
+        {% for e in eventos_regulares %}
+          <li>
+            <span class="evdate">
+              {% if e.data_inicio == e.data_fim %}{{ e.data_inicio|date:"d/m" }}
+              {% else %}{{ e.data_inicio|date:"d/m" }}–{{ e.data_fim|date:"d/m" }}{% endif %}
+            </span>
+            — <span class="evcat">{{ e.get_categoria_display }}</span> — {{ e.titulo }}{% if not orgao %}{% if e.orgao %} — {{ e.orgao.nome }}{% else %} — Geral{% endif %}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div style="color:var(--muted);">Nenhum evento cadastrado para {{ ano }}.</div>
+    {% endif %}
+  </div>
+
+  <div class="no-print" style="margin-top:8px;">
+    <button class="btn-print" onclick="window.print()">Imprimir</button>
+  </div>
+
+</body>
+</html>

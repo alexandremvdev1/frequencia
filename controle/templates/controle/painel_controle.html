@@ -1,19 +1,22 @@
 {% load static %}
 {% load controle_filters %}
+{% load custom_filters %}
 <!doctype html>
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
   <title>Folha de Frequência • Painel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
         integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
         crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="{% static 'css/style.css' %}">
+
   <style>
-    :root{ --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18); --g1:#0b1020; --g2:#111a3a; --base-font:14px; }
-    html{ font-size: var(--base-font); } body{ background:#f6f8fb; color:var(--ink); }
+    :root{ --ink:#0f172a; --muted:#64748b; --ring:rgba(37,99,235,.18); --g1:#0b1020; --g2:#111a3a; --base-font:14px; --border:#e5e7eb; --bg:#f6f8fb; }
+    html{ font-size: var(--base-font); } body{ background:var(--bg); color:var(--ink); }
     .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); } .navbar-brand{ font-size:1rem; } .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
     .welcome{ background:linear-gradient(90deg,#111827,#1f2937); color:#fff; border-radius:.75rem; padding:1rem 1.25rem; box-shadow:0 10px 24px rgba(17,24,39,.12); }
     .welcome .muted{ opacity:.85; font-size:.9rem; }
@@ -25,6 +28,23 @@
     .importar-botao{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:#111827; color:#fff; text-decoration:none; box-shadow:0 10px 24px rgba(17,24,39,.18); transition:transform .08s ease, opacity .2s ease; }
     .importar-botao:hover{ transform:translateY(-2px); opacity:.92; }
     .banner-desenvolvido{ background:linear-gradient(90deg,#2a4d69,#3b82f6); color:#fff; font-size:.8rem; }
+
+    /* ===== Mini Calendário ===== */
+    .calendar-grid{ display:grid; grid-template-columns: repeat(7,1fr); gap:6px; }
+    .cal-head{ font-size:.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.04em; text-align:center; }
+    .day{ background:#fff; border:1px solid var(--border); border-radius:.5rem; min-height:92px; padding:6px; display:flex; flex-direction:column; gap:4px; }
+    .day.out{ opacity:.5; background:#fafafa; }
+    .day .num{ font-size:.8rem; font-weight:700; color:#0f172a; }
+    .evt{ font-size:.7rem; line-height:1.1; border-radius:.35rem; padding:2px 4px; border:1px solid transparent; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* Cores por categoria */
+    .evt-PLANEJAMENTO{ background:#fef3c7; border-color:#fde68a; }   /* amarelo */
+    .evt-FERIADO{ background:#fee2e2; border-color:#fecaca; }        /* vermelho claro */
+    .evt-RECESSO{ background:#e9d5ff; border-color:#d8b4fe; }        /* roxo claro */
+    .evt-REUNIAO{ background:#d1fae5; border-color:#a7f3d0; }        /* verde claro */
+    .evt-AVALIACAO{ background:#dbeafe; border-color:#bfdbfe; }      /* azul claro */
+    .evt-AULA{ background:#f1f5f9; border-color:#e2e8f0; }           /* cinza */
+    .evt-OUTRO{ background:#f5f5f5; border-color:#e5e5e5; }
   </style>
 </head>
 <body>
@@ -35,6 +55,10 @@
     <div class="d-flex align-items-center gap-2 ms-auto">
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+      <!-- ✅ Botão do Calendário Escolar -->
+      <a class="btn btn-sm btn-outline-warning" href="{% url 'controle:calendario_escolar' %}">
+        <i class="fa-solid fa-calendar-days me-1"></i> Calendário Escolar
+      </a>
       <span class="vr text-white opacity-50 mx-1"></span>
       <a class="btn btn-sm btn-danger" href="{% url 'controle:logout' %}"><i class="fa-solid fa-right-from-bracket me-1"></i> Sair</a>
     </div>
@@ -122,7 +146,7 @@
       </div>
     </div>
 
-    <!-- Listas de aniversariantes -->
+    <!-- Coluna de Aniversariantes + Mini Calendário -->
     <div class="col-12 col-xl-8">
       <div class="card card-clean p-3 mb-3">
         <div class="d-flex justify-content-between align-items-center">
@@ -144,7 +168,7 @@
         </div>
       </div>
 
-      <div class="card card-clean p-3">
+      <div class="card card-clean p-3 mb-3">
         <div class="d-flex justify-content-between align-items-center">
           <h2 class="h6 m-0">🎂 Aniversariantes de hoje</h2>
         </div>
@@ -162,6 +186,59 @@
             <div class="text-center text-muted-2 py-3">Nenhum aniversariante de hoje.</div>
           {% endif %}
         </div>
+      </div>
+
+      <!-- ✅ Mini Calendário do mês atual -->
+      <div class="card card-clean p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 m-0">
+            <i class="fa-solid fa-calendar-days me-1"></i>
+            Calendário — {% if cal_mes_nome and cal_ano %}{{ cal_mes_nome }} / {{ cal_ano }}{% else %}{% now "F / Y" %}{% endif %}
+          </h2>
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'controle:calendario_escolar' %}">
+            Ver completo
+          </a>
+        </div>
+
+        {% if cal_weeks and cal_events_by_day %}
+          <div class="calendar-grid mb-2">
+            <div class="cal-head fw-semibold">Dom</div>
+            <div class="cal-head fw-semibold">Seg</div>
+            <div class="cal-head fw-semibold">Ter</div>
+            <div class="cal-head fw-semibold">Qua</div>
+            <div class="cal-head fw-semibold">Qui</div>
+            <div class="cal-head fw-semibold">Sex</div>
+            <div class="cal-head fw-semibold">Sáb</div>
+
+            {% for week in cal_weeks %}
+              {% for d in week %}
+                {% with evts=cal_events_by_day|get_item:d %}
+                <div class="day {% if cal_mes_num and d|date:'n' != cal_mes_num %}out{% endif %}"
+                     {% if evts and evts|length %}
+                       data-bs-toggle="tooltip" data-bs-html="true"
+                       data-bs-title="{% for e in evts %}• {{ e.titulo }}{% if not forloop.last %}<br>{% endif %}{% endfor %}"
+                     {% endif %}>
+                  <div class="num">{{ d.day }}</div>
+                  <div class="flex-grow-1 d-flex flex-column gap-1">
+                    {% if evts %}
+                      {% for e in evts|slice:":3" %}
+                        <div class="evt evt-{{ e.categoria }}">{{ e.titulo }}</div>
+                      {% endfor %}
+                      {% if evts|length > 3 %}
+                        <div class="evt evt-OUTRO">+{{ evts|length|add:"-3" }} mais…</div>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                </div>
+                {% endwith %}
+              {% endfor %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-center text-muted-2 py-3">
+            Calendário do mês indisponível aqui. Acesse o <a href="{% url 'controle:calendario_escolar' %}">Calendário Escolar</a>.
+          </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -187,6 +264,18 @@
   </a>
 </div>
 {% endif %}
+
+<!-- Bootstrap JS (para tooltips) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // Inicializa tooltips do calendário
+  document.addEventListener('DOMContentLoaded', function () {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+  });
+</script>
 
 </body>
 </html>

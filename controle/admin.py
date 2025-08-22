@@ -10,7 +10,9 @@ from .models import (
     HorarioTrabalho, Feriado, FolhaFrequencia, SabadoLetivo,
     AcessoPrefeitura, AcessoSecretaria, AcessoOrgao, AcessoSetor, NivelAcesso,
     UserScope, FuncaoPermissao,
+    CalendarioEvento, RecessoFuncionario,  # <-- ADICIONADOS AQUI
 )
+
 from .admin_forms import ConcederAcessoForm, RevogarAcessoForm
 
 # =========================
@@ -781,3 +783,34 @@ class FuncaoPermissaoAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__first_name", "user__last_name", "nome_funcao")
     autocomplete_fields = ("user", "secretaria", "orgao", "setor")
     ordering = ("user__username", "nome_funcao")
+
+@admin.register(CalendarioEvento)
+class CalendarioEventoAdmin(admin.ModelAdmin):
+    list_display = ("titulo", "categoria", "data_inicio", "data_fim", "orgao_nome")
+    list_filter = ("categoria", "orgao", ("data_inicio", admin.DateFieldListFilter))
+    search_fields = ("titulo", "descricao", "orgao__nome")
+    date_hierarchy = "data_inicio"
+    ordering = ("data_inicio", "titulo")
+    list_select_related = ("orgao",)
+    autocomplete_fields = ("orgao",)
+    list_per_page = 25
+
+    fieldsets = (
+        (None, {"fields": ("titulo", "categoria", "descricao")}),
+        ("Período", {"fields": (("data_inicio", "data_fim"),)}),
+        ("Escopo", {"fields": ("orgao",)}),
+    )
+
+    @admin.display(description="Órgão")
+    def orgao_nome(self, obj):
+        return obj.orgao.nome if obj.orgao_id else "Geral"
+
+@admin.register(RecessoFuncionario)
+class RecessoFuncionarioAdmin(admin.ModelAdmin):
+    list_display = ("funcionario", "setor", "data_inicio", "data_fim", "motivo")
+    list_filter = ("setor", "setor__orgao", "setor__secretaria", "setor__prefeitura")
+    search_fields = ("funcionario__nome", "setor__nome", "motivo")
+    date_hierarchy = "data_inicio"
+    list_select_related = ("funcionario", "setor", "setor__orgao", "setor__secretaria", "setor__prefeitura")
+    ordering = ("-data_inicio", "-data_fim")
+    list_per_page = 25

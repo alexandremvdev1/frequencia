@@ -97,6 +97,10 @@ urlpatterns = [
     path('planejamento/selecionar/', views.selecionar_funcionarios_planejamento, name='selecionar_funcionarios_planejamento'),
     path('folhas/excluir-selecionadas/', views.excluir_folhas_selecionadas, name='excluir_folhas_selecionadas'),
     path('sabados-letivos/', views.sabados_letivos, name='sabados_letivos'),
+
+    path("calendario/", views.calendario_escolar, name="calendario_escolar"),
+    path("calendario/excluir/<int:pk>/", views.calendario_excluir, name="calendario_excluir"),
+    path("calendario/impressao/", views.calendario_impressao, name="calendario_impressao"),
 ]
 
 

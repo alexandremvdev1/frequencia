@@ -199,3 +199,36 @@ class RecessoFuncionarioForm(forms.ModelForm):
             base_func = base_func.filter(setor_id=setor_id)
 
         self.fields["funcionario"].queryset = base_func.order_by("nome")
+
+# controle/forms.py
+from django import forms
+from .models import CalendarioEvento, Orgao, Setor
+from .models import AcessoOrgao, AcessoSecretaria, AcessoPrefeitura  # se quiser refinar escopo
+
+class CalendarioEventoForm(forms.ModelForm):
+    class Meta:
+        model = CalendarioEvento
+        fields = ["titulo", "categoria", "data_inicio", "data_fim", "descricao", "orgao"]
+        widgets = {
+            "data_inicio": forms.DateInput(attrs={"type": "date"}),
+            "data_fim": forms.DateInput(attrs={"type": "date"}),
+            "descricao": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop("user", None)
+        super().__init__(*args, **kwargs)
+
+        # Filtra órgãos visíveis ao usuário (básico: via setores que ele enxerga)
+        try:
+            from .models import filter_setores_by_scope
+            setores_visiveis = filter_setores_by_scope(Setor.objects.select_related("orgao", "secretaria", "prefeitura"), user)
+            orgaos_ids = setores_visiveis.exclude(orgao__isnull=True).values_list("orgao_id", flat=True).distinct()
+            self.fields["orgao"].queryset = Orgao.objects.filter(id__in=orgaos_ids).order_by("nome")
+            self.fields["orgao"].required = False
+            self.fields["orgao"].empty_label = "— Geral (todas as unidades) —"
+        except Exception:
+            # fallback: não filtra
+            self.fields["orgao"].queryset = Orgao.objects.all().order_by("nome")
+            self.fields["orgao"].required = False
+            self.fields["orgao"].empty_label = "— Geral (todas as unidades) —"

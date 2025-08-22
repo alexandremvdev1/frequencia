@@ -572,3 +572,55 @@ class RecessoFuncionario(models.Model):
 
     def __str__(self):
         return f"Recesso {self.funcionario} ({self.data_inicio} → {self.data_fim})"
+
+class CalendarioEvento(models.Model):
+    class Categoria(models.TextChoices):
+        # Existentes/gerais
+        PLANEJAMENTO = 'PLANEJAMENTO', 'Planejamento'
+        REUNIAO      = 'REUNIAO', 'Reunião'
+        AVALIACAO    = 'AVALIACAO', 'Avaliação'
+        AULA         = 'AULA', 'Aula'
+        OUTRO        = 'OUTRO', 'Outro'
+
+        # Consolidação solicitada (um só para férias/recesso/feriado)
+        NAO_LETIVO   = 'NAO_LETIVO', 'Férias / Recesso / Feriado'
+
+        # Novos tipos
+        MATRICULAS             = 'MATRICULAS', 'Matrículas'
+        AULA_INAUGURAL         = 'AULA_INAUGURAL', 'Aula inaugural'
+        INICIO_BIMESTRE        = 'INICIO_BIMESTRE', 'Início das aulas no bimestre'
+        CONSELHO_PEDAGOGICO    = 'CONSELHO_PEDAGOGICO', 'Conselho de classe/pedagógico'
+        PPP_AVALIACAO          = 'PPP_AVALIACAO', 'PPP — Avaliação'
+        FORMACAO_TURMAS        = 'FORMACAO_TURMAS', 'Formação de turmas'
+        FORMATURAS             = 'FORMATURAS', 'Formaturas escolares'
+        AVALIACAO_DIAGNOSTICA  = 'AVALIACAO_DIAGNOSTICA', 'Avaliação diagnóstica'
+        RECUPERACOES_FINAIS    = 'RECUPERACOES_FINAIS', 'Recuperações finais'
+        SAETO                  = 'SAETO', 'SAETO'
+        INDEPENDENCIA_BRASIL   = 'INDEPENDENCIA_BRASIL', 'Independência do Brasil'
+        FORMACOES_CONTINUADAS  = 'FORMACOES_CONTINUADAS', 'Formações continuadas (rede)'
+        DATAS_COMEMORATIVAS    = 'DATAS_COMEMORATIVAS', 'Datas comemorativas'
+
+    titulo = models.CharField(max_length=120)
+    # ↑ aumente o max_length p/ suportar slugs longos
+    categoria = models.CharField(max_length=32, choices=Categoria.choices, default=Categoria.OUTRO)
+
+    data_inicio = models.DateField()
+    data_fim = models.DateField()
+    descricao = models.TextField(blank=True, null=True)
+
+    # Escopo opcional por unidade (Órgão). Se vazio = global/geral.
+    orgao = models.ForeignKey('controle.Orgao', on_delete=models.PROTECT, null=True, blank=True, related_name='eventos')
+
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("data_inicio", "titulo")
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.data_fim and self.data_inicio and self.data_fim < self.data_inicio:
+            raise ValidationError({"data_fim": "Data final não pode ser anterior à data inicial."})
+
+    def __str__(self):
+        alvo = self.orgao.nome if self.orgao_id else "GLOBAL"
+        return f"{self.titulo} ({self.get_categoria_display()}) {self.data_inicio}→{self.data_fim} @ {alvo}"
