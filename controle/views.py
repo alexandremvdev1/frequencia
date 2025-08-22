@@ -63,22 +63,30 @@ def _is_superadmin(user):
 def _only_superuser(user):
     return _is_superadmin(user)
 
+
+def _only_superuser(u):  # se já existir em outro lugar, pode remover esta função
+    return bool(u and u.is_superuser)
+
 @login_required
 @user_passes_test(_only_superuser)
 def acessos_conceder(request):
     """
-    Concede um escopo para um usuário: Prefeitura OU Secretaria OU Órgão OU Setor (exatamente 1).
-    Nível: LEITURA ou GERENCIA.
+    Concede/acerta um acesso para um usuário em EXATAMENTE um alvo:
+    Prefeitura OU Secretaria OU Órgão OU Setor.
+    Salva nas tabelas AcessoPrefeitura/Secretaria/Orgao/Setor.
     """
+    User = get_user_model()
+
     if request.method == "POST":
         user_id = request.POST.get("user")
-        nivel = (request.POST.get("nivel") or "LEITURA").upper()
+        nivel = (request.POST.get("nivel") or "").upper().strip()
 
-        pref_id = request.POST.get("prefeitura") or ""
-        sec_id  = request.POST.get("secretaria") or ""
-        org_id  = request.POST.get("orgao") or ""
-        set_id  = request.POST.get("setor") or ""
+        pref_id = (request.POST.get("prefeitura") or "").strip()
+        sec_id  = (request.POST.get("secretaria") or "").strip()
+        org_id  = (request.POST.get("orgao") or "").strip()
+        set_id  = (request.POST.get("setor") or "").strip()
 
+        # Validações básicas
         if not user_id:
             messages.error(request, "Selecione um usuário.")
             return redirect("controle:acessos_conceder")
@@ -89,38 +97,89 @@ def acessos_conceder(request):
             messages.error(request, "Usuário inválido.")
             return redirect("controle:acessos_conceder")
 
+        if nivel not in dict(NivelAcesso.choices):
+            messages.error(request, "Selecione um nível de acesso válido (Leitura ou Gerenciar).")
+            return redirect("controle:acessos_conceder")
+
         escolhas = [
-            ("prefeitura_id", pref_id),
-            ("secretaria_id", sec_id),
-            ("orgao_id", org_id),
-            ("setor_id", set_id),
+            ("prefeitura", pref_id),
+            ("secretaria", sec_id),
+            ("orgao",      org_id),
+            ("setor",      set_id),
         ]
         preenchidas = [(k, v) for k, v in escolhas if v]
         if len(preenchidas) != 1:
-            messages.error(request, "Selecione exatamente um nível de alvo (Prefeitura OU Secretaria OU Órgão OU Setor).")
+            messages.error(
+                request,
+                "Selecione exatamente um alvo (Prefeitura OU Secretaria OU Órgão OU Setor)."
+            )
             return redirect("controle:acessos_conceder")
 
-        kwargs = {"user": alvo_user, "nivel": nivel}
-        chave, valor = preenchidas[0]
-        kwargs[chave] = valor
+        alvo, alvo_pk = preenchidas[0]
 
-        scope, created = UserScope.objects.get_or_create(**kwargs)
-        if created:
-            messages.success(request, "Acesso concedido com sucesso.")
-        else:
-            messages.info(request, "Este acesso já existia para o usuário.")
+        try:
+            with transaction.atomic():
+                created = False
+                updated = False
+
+                if alvo == "prefeitura":
+                    pref = get_object_or_404(Prefeitura, pk=alvo_pk)
+                    obj, was_created = AcessoPrefeitura.objects.update_or_create(
+                        user=alvo_user, prefeitura=pref,
+                        defaults={"nivel": nivel}
+                    )
+                    created = was_created
+                    updated = (not was_created)
+
+                elif alvo == "secretaria":
+                    sec = get_object_or_404(Secretaria, pk=alvo_pk)
+                    obj, was_created = AcessoSecretaria.objects.update_or_create(
+                        user=alvo_user, secretaria=sec,
+                        defaults={"nivel": nivel}
+                    )
+                    created = was_created
+                    updated = (not was_created)
+
+                elif alvo == "orgao":
+                    org = get_object_or_404(Orgao, pk=alvo_pk)
+                    obj, was_created = AcessoOrgao.objects.update_or_create(
+                        user=alvo_user, orgao=org,
+                        defaults={"nivel": nivel}
+                    )
+                    created = was_created
+                    updated = (not was_created)
+
+                elif alvo == "setor":
+                    st = get_object_or_404(Setor, pk=alvo_pk)
+                    obj, was_created = AcessoSetor.objects.update_or_create(
+                        user=alvo_user, setor=st,
+                        defaults={"nivel": nivel}
+                    )
+                    created = was_created
+                    updated = (not was_created)
+
+            if created:
+                messages.success(request, "Acesso criado com sucesso.")
+            elif updated:
+                messages.success(request, "Acesso já existente — nível atualizado com sucesso.")
+            else:
+                messages.info(request, "Acesso já existia e permaneceu inalterado.")
+
+        except Exception as e:
+            messages.error(request, f"Erro ao salvar o acesso: {e}")
 
         return redirect("controle:acessos_conceder")
 
-    # GET — carrega listas para selects
+    # GET — popula os selects usados no template
     contexto = {
         "usuarios": User.objects.order_by("username", "first_name", "last_name"),
+        "niveis": NivelAcesso.choices,
         "prefeituras": Prefeitura.objects.order_by("nome"),
         "secretarias": Secretaria.objects.select_related("prefeitura").order_by("prefeitura__nome", "nome"),
-        "orgaos": Orgao.objects.select_related("secretaria", "secretaria__prefeitura").order_by("secretaria__prefeitura__nome", "secretaria__nome", "nome"),
-        "setores": Setor.objects.select_related("prefeitura", "secretaria", "orgao").order_by("nome"),
-        "niveis": [("LEITURA", "Leitura"), ("GERENCIA", "Gerenciar (CRUD)")],
-        "escopos_recentes": UserScope.objects.select_related("user", "prefeitura", "secretaria", "orgao", "setor").order_by("-id")[:25],
+        "orgaos": Orgao.objects.select_related("secretaria", "secretaria__prefeitura")
+                               .order_by("secretaria__prefeitura__nome", "secretaria__nome", "nome"),
+        "setores": Setor.objects.select_related("prefeitura", "secretaria", "orgao",
+                                                "orgao__secretaria", "orgao__secretaria__prefeitura").order_by("nome"),
     }
     return render(request, "controle/acessos_conceder.html", contexto)
 
