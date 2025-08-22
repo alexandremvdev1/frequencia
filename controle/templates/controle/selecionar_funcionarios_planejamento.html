@@ -1,0 +1,208 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Planejamento • Selecionar Funcionários</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Bootstrap + FontAwesome -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+
+  <style>
+    :root{ --ink:#0f172a; --muted:#64748b; --g1:#0b1020; --g2:#111a3a; --base-font:14px; --border:#e5e7eb; }
+    html{ font-size: var(--base-font); }
+    body{ background:#f6f8fb; color:var(--ink); }
+    .nav-pro{ background:linear-gradient(90deg,var(--g1),var(--g2)); }
+    .navbar-brand{ font-size:1rem; }
+    .navbar .btn{ font-size:.85rem; padding:.25rem .5rem; }
+    .card-clean{ border:none; box-shadow:0 10px 24px rgba(17,24,39,.08); border-radius:.9rem; }
+    .table-sm td, .table-sm th{ padding:.45rem .5rem; }
+    .search-mini{ max-width: 340px; }
+    .help-text{ font-size:.8rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar nav-pro navbar-dark mb-3">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{% url 'controle:painel_controle' %}">Folha de Frequência</a>
+
+    <div class="d-flex align-items-center gap-2 ms-auto">
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:painel_controle' %}">← Voltar ao Painel</a>
+      <span class="vr text-white opacity-50 mx-1"></span>
+
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_horarios_funcionarios' %}">
+        <i class="fa-solid fa-table-list me-1"></i> Horários por Servidor
+      </a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:cadastrar_horario' %}">
+        <i class="fa-solid fa-clock me-1"></i> Cadastrar Horário
+      </a>
+
+      <span class="vr text-white opacity-50 mx-1"></span>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
+      <a class="btn btn-sm btn-light" href="{% url 'controle:cadastrar_funcionario' %}">+ Funcionário</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container py-2 py-lg-3">
+  <div class="card card-clean p-3">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-2">
+      <div>
+        <h1 class="h5 m-0">
+          <i class="fa-solid fa-clipboard-check me-2"></i>Selecionar Funcionários para Planejamento
+        </h1>
+        <div class="help-text mt-1">
+          Dica: você pode digitar “17h25min às 20h40min”, “17:25 as 20:40” etc. — será salvo como <strong>17:25–20:40</strong>.
+        </div>
+      </div>
+
+      <!-- Filtros -->
+      <form method="get" class="d-flex gap-2 align-items-center">
+        <select class="form-select form-select-sm" name="setor" style="max-width:260px">
+          <option value="">— Todos os setores —</option>
+          {% for s in setores %}
+            <option value="{{ s.id }}" {% if filtros.setor|stringformat:"s" == s.id|stringformat:"s" %}selected{% endif %}>{{ s.nome }}</option>
+          {% endfor %}
+        </select>
+
+        <input type="search" class="form-control form-control-sm search-mini" name="q" placeholder="Buscar por nome"
+               value="{{ filtros.q|default:'' }}">
+
+        <button class="btn btn-sm btn-primary" type="submit">
+          <i class="fa-solid fa-filter me-1"></i> Filtrar
+        </button>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'controle:selecionar_funcionarios_planejamento' %}">
+          Limpar
+        </a>
+      </form>
+    </div>
+
+    {% if messages %}
+      {% for m in messages %}
+        <div class="alert alert-{{ m.tags }} py-2 mb-2">{{ m }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <form method="post" id="form-planejamento">
+      {% csrf_token %}
+
+      <!-- Ações em massa (topo) -->
+      <div class="d-flex flex-column flex-md-row gap-2 align-items-md-center justify-content-between mb-2">
+        <div class="d-flex gap-2 align-items-center">
+          <button name="acao" value="habilitar" class="btn btn-success btn-sm">
+            <i class="fa-regular fa-square-check me-1"></i> Habilitar planejamento (selecionados)
+          </button>
+          <button name="acao" value="remover" class="btn btn-outline-danger btn-sm" id="btn-remover-top">
+            <i class="fa-regular fa-square-minus me-1"></i> Remover planejamento (selecionados)
+          </button>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <label class="form-label m-0 small text-muted">Horário padrão (opcional):</label>
+          <input type="text" class="form-control form-control-sm" name="horario_padrao"
+                 placeholder="Ex.: 17h25min às 20h40min (salva como 17:25–20:40)">
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th style="width:40px;">
+                <input type="checkbox" class="form-check-input" id="check-all">
+              </th>
+              <th>Nome</th>
+              <th>Setor</th>
+              <th style="width:130px;">Planejamento?</th>
+              <th>Horário Planejamento</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in funcionarios %}
+              <tr>
+                <td>
+                  <input type="checkbox" class="form-check-input sel" name="funcionarios" value="{{ f.id }}">
+                </td>
+                <td class="fw-semibold">{{ f.nome }}</td>
+                <td>{{ f.setor.nome }}</td>
+                <td>
+                  {% if f.tem_planejamento %}
+                    <span class="badge text-bg-success">Habilitado</span>
+                  {% else %}
+                    <span class="badge text-bg-secondary">Desabilitado</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted">
+                  {{ f.horario_planejamento|default_if_none:"—"|default:"—" }}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="text-muted">Nenhum funcionário encontrado para os filtros informados.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Ações em massa (rodapé) -->
+      <div class="d-flex flex-column flex-md-row gap-2 align-items-md-center justify-content-between mt-2">
+        <div class="d-flex gap-2 align-items-center">
+          <button name="acao" value="habilitar" class="btn btn-success btn-sm">
+            <i class="fa-regular fa-square-check me-1"></i> Habilitar planejamento (selecionados)
+          </button>
+        <button name="acao" value="remover" class="btn btn-outline-danger btn-sm" id="btn-remover-bottom">
+            <i class="fa-regular fa-square-minus me-1"></i> Remover planejamento (selecionados)
+          </button>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center">
+          <label class="form-label m-0 small text-muted">Horário padrão (opcional):</label>
+          <input type="text" class="form-control form-control-sm" name="horario_padrao"
+                 placeholder="Ex.: 17h25min às 20h40min (salva como 17:25–20:40)">
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="text-center my-4">
+    <a class="btn btn-outline-secondary" href="{% url 'controle:painel_controle' %}">
+      <i class="fa-solid fa-arrow-left me-1"></i> Voltar ao Painel de Controle
+    </a>
+  </div>
+</main>
+
+<script>
+  // Selecionar / desmarcar todos
+  document.addEventListener('DOMContentLoaded', function(){
+    const checkAll = document.getElementById('check-all');
+    const boxes = document.querySelectorAll('input.sel[type="checkbox"]');
+    if(checkAll){
+      checkAll.addEventListener('change', function(){
+        boxes.forEach(b => b.checked = checkAll.checked);
+      });
+    }
+
+    // Se usuário clicar em "remover", limpamos o campo de horário (opcional)
+    function clearHorarioOnRemove(btnId){
+      const btn = document.getElementById(btnId);
+      if(!btn) return;
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('input[name="horario_padrao"]').forEach(i => i.value = '');
+      });
+    }
+    clearHorarioOnRemove('btn-remover-top');
+    clearHorarioOnRemove('btn-remover-bottom');
+  });
+</script>
+
+</body>
+</html>

@@ -37,6 +37,20 @@
     <div class="d-flex align-items-center gap-2 ms-auto">
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:painel_controle' %}">← Voltar ao Painel</a>
       <span class="vr text-white opacity-50 mx-1"></span>
+
+      <!-- ✅ Botões de atalho -->
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_horarios_funcionarios' %}">
+        <i class="fa-solid fa-table-list me-1"></i> Horários por Servidor
+      </a>
+      <a class="btn btn-sm btn-outline-warning" href="{% url 'controle:selecionar_funcionarios_planejamento' %}">
+        <i class="fa-regular fa-square-check me-1"></i> Selecionar Planejamento
+      </a>
+      <!-- ✅ Novo botão: Sábados Letivos -->
+      <a class="btn btn-sm btn-outline-light" href="{% url 'controle:sabados_letivos' %}">
+        <i class="fa-solid fa-calendar-day me-1"></i> Sábados Letivos
+      </a>
+
+      <span class="vr text-white opacity-50 mx-1"></span>
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_funcionarios' %}">Funcionários</a>
       <a class="btn btn-sm btn-outline-light" href="{% url 'controle:listar_folhas' %}">Folhas Geradas</a>
       <a class="btn btn-sm btn-light" href="{% url 'controle:cadastrar_funcionario' %}">+ Funcionário</a>

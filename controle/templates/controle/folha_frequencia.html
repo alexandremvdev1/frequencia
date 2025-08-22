@@ -25,7 +25,7 @@
         .logo-strip .slot.left{ text-align:left; }
         .logo-strip .slot.right{ text-align:right; }
         .logo-strip img{
-            max-height: 70px;       /* ajuste fino p/ caber no A4 */
+            max-height: 70px;
             width: auto;
             object-fit: contain;
         }
@@ -36,8 +36,8 @@
         .titulo-secretaria   { font-size: 10px; font-weight: 600; }
         .titulo-departamento { font-size: 9px;  font-weight: 600; }
 
-        /* Bloco “Escola/Unidade” (somente texto agora) */
-        .header-escola { font-size: 9px; text-align: center; margin: 8px 0 8px 0; }
+        /* Unidade/Órgão */
+        .header-unidade { font-size: 9px; text-align: center; margin: 8px 0 8px 0; }
 
         table { width: 100%; border-collapse: collapse; font-size: 8px; }
         th, td { border: 1px solid #838383; padding: 1px 3px; text-align: center; }
@@ -61,6 +61,17 @@
         .assinatura-chefia .rotulo { margin:2px 0; font-weight:bold; font-size:10px; }
         .assinatura-chefia .nome { margin:1px 0; font-size:9px; font-weight:bold; }
         .assinatura-chefia .funcao { margin:0; font-size:8px; }
+
+        /* Faixa “Planejamento” */
+        .bar-planejamento{
+            background:#e6e6e6;
+            border:1px solid #838383;
+            padding:3px 6px;
+            text-align:center;
+            font-size:8px;           /* mesmo tamanho das demais fontes */
+            font-weight:700;         /* ênfase sem aumentar o tamanho */
+            margin:8px 0 4px 0;
+        }
     </style>
 </head>
 <body>
@@ -88,14 +99,25 @@
 <div class="header-org">
     {% if header_prefeitura %}<div class="titulo-prefeitura">{{ header_prefeitura|upper }}</div>{% endif %}
     {% if header_secretaria %}<div class="titulo-secretaria">{{ header_secretaria }}</div>{% endif %}
-    {% if header_departamento %}<div class="titulo-departamento">{{ header_departamento }}</div>{% endif %}
 </div>
 
-<!-- Escola / Unidade (apenas texto para evitar duplicar logo do Órgão) -->
-<div class="header-escola">
-    <strong>{{ escola.nome_escola }}</strong><br>
-    Endereço: {{ escola.endereco }}, {{ escola.numero }}, {{ escola.bairro }}, {{ escola.cidade }}/{{ escola.uf }}<br>
-    {% if escola.telefone %}Telefone: {{ escola.telefone }}{% endif %}{% if escola.email %} | E-mail: {{ escola.email }}{% endif %}
+<!-- Unidade/Órgão: endereço/contatos do ÓRGÃO (fallback: Escola) -->
+<div class="header-unidade">
+  {% with og=orgao|default:funcionario.orgao %}
+    {% if og %}
+      <strong>{{ og.nome }}</strong><br>
+      {% if og.endereco %}Endereço: {{ og.endereco }}{% if og.numero %}, {{ og.numero }}{% endif %}{% if og.bairro %}, {{ og.bairro }}{% endif %}{% endif %}
+      {% if og.cidade %}{% if og.endereco %} — {% endif %}{{ og.cidade }}{% if og.uf %}/{{ og.uf }}{% endif %}{% endif %}
+      {% if og.cep %}{% if og.endereco or og.cidade %} — {% endif %}CEP: {{ og.cep }}{% endif %}<br>
+      {% if og.telefone %}Telefone: {{ og.telefone }}{% endif %}{% if og.email %}{% if og.telefone %} | {% endif %}E-mail: {{ og.email }}{% endif %}
+    {% else %}
+      {% if escola %}
+        <strong>{{ escola.nome_escola }}</strong><br>
+        Endereço: {{ escola.endereco }}{% if escola.numero %}, {{ escola.numero }}{% endif %}{% if escola.bairro %}, {{ escola.bairro }}{% endif %}, {{ escola.cidade }}/{{ escola.uf }}<br>
+        {% if escola.telefone %}Telefone: {{ escola.telefone }}{% endif %}{% if escola.email %} | E-mail: {{ escola.email }}{% endif %}
+      {% endif %}
+    {% endif %}
+  {% endwith %}
 </div>
 
 <table class="tabela-func">
@@ -211,7 +233,7 @@
 {% endwith %}
 
 {% if planejamento %}
-  <h3>Planejamento</h3>
+  <div class="bar-planejamento">Planejamento</div>
   <table>
     <thead>
       <tr>

@@ -3,9 +3,9 @@ import calendar
 import locale
 from calendar import monthrange
 from datetime import date, datetime, timedelta
-
+from django.db.models import Prefetch
 import pandas as pd
-
+import unicodedata
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
@@ -22,6 +22,7 @@ from django.utils.safestring import mark_safe
 from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods
 from django.core.paginator import Paginator
+from urllib.parse import urlencode
 
 from .forms import (
     HorarioTrabalhoForm,
@@ -1034,103 +1035,412 @@ def painel_controle(request):
 # Importações
 # =====================================================================
 
+def _norm(s: str) -> str:
+    if s is None:
+        return ""
+    s = unicodedata.normalize("NFKD", str(s))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.strip().lower()
+
 @login_required
 def importar_funcionarios(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
-        excel_file = request.FILES['excel_file']
+        arquivo = request.FILES['excel_file']
+        nome_arquivo = arquivo.name.lower()
 
-        if not excel_file.name.endswith(('.xlsx', '.xls')):
-            messages.error(request, "Por favor, envie um arquivo Excel (.xlsx ou .xls).")
+        # Aceita xlsx, xls, csv
+        if not nome_arquivo.endswith(('.xlsx', '.xls', '.csv')):
+            messages.error(request, "Envie um arquivo .xlsx, .xls ou .csv.")
             return render(request, 'controle/importar_funcionarios.html')
 
+        # Ler arquivo com fallbacks
         try:
-            df = pd.read_excel(excel_file)
+            if nome_arquivo.endswith('.csv'):
+                df = pd.read_csv(arquivo)
+            elif nome_arquivo.endswith('.xlsx'):
+                try:
+                    import openpyxl  # noqa
+                except ImportError:
+                    messages.error(request, "Falta 'openpyxl' para .xlsx. Instale: pip install openpyxl (ou envie CSV).")
+                    return render(request, 'controle/importar_funcionarios.html')
+                df = pd.read_excel(arquivo, engine='openpyxl')
+            else:  # .xls
+                try:
+                    import xlrd  # noqa
+                except ImportError:
+                    messages.error(request, "Falta 'xlrd' para .xls. Instale: pip install xlrd (ou converta para .xlsx/CSV).")
+                    return render(request, 'controle/importar_funcionarios.html')
+                df = pd.read_excel(arquivo, engine='xlrd')
+        except Exception as e:
+            messages.error(request, f"Ocorreu um erro ao abrir o arquivo: {e}")
+            return render(request, 'controle/importar_funcionarios.html')
 
-            if 'Data de Admissão' in df.columns:
-                df['Data de Admissão'] = pd.to_datetime(df['Data de Admissão'], dayfirst=True, errors='coerce')
-            if 'Data de Nascimento' in df.columns:
-                df['Data de Nascimento'] = pd.to_datetime(df['Data de Nascimento'], dayfirst=True, errors='coerce')
+        # Nomes de colunas limpos
+        df.columns = [str(c).strip() for c in df.columns]
 
-            total_importados = 0
+        # Colunas EXATAS requeridas (batem com o modelo/cabeçalho)
+        obrigatorias = [
+            'Nome', 'Matrícula', 'Setor', 'Cargo', 'Função',
+            'Data de Admissão', 'Série', 'Turma', 'Turno (cadastro)', 'Vínculo'
+        ]
+        faltantes = [c for c in obrigatorias if c not in df.columns]
+        if faltantes:
+            messages.error(request, "Colunas obrigatórias ausentes: " + ", ".join(faltantes))
+            return render(request, 'controle/importar_funcionarios.html')
 
+        # Conversão de data (campo do modelo é obrigatório)
+        df['Data de Admissão'] = pd.to_datetime(df['Data de Admissão'], dayfirst=True, errors='coerce')
+
+        # Choices do modelo (canônicos)
+        TURNO_MAP = {
+            'matutino': 'Matutino',
+            'vespertino': 'Vespertino',
+            'noturno': 'Noturno',
+            'integral': 'Integral',
+        }
+        VINC_MAP = {
+            'efetivo': 'Efetivo',
+            'contratado': 'Contratado',
+        }
+        SERIES_OK = {
+            '1º ANO','2º ANO','3º ANO','4º ANO','5º ANO','6º ANO','7º ANO','8º ANO','9º ANO'
+        }
+        TURMAS_OK = {'A','B','C','D','E','F','G'}
+
+        def cell(row, col):
+            val = row.get(col)
+            if pd.isna(val):
+                return ""
+            return str(val).strip()
+
+        total_ok = 0
+        ign_sem_matricula = 0
+        ign_sem_setor = 0
+        ign_admissao_invalida = 0
+        ajustados_turno = 0
+        ajustados_vinculo = 0
+        inval_series = 0
+        inval_turmas = 0
+
+        with transaction.atomic():
             for _, row in df.iterrows():
-                setor_nome = str(row.get('Setor')).strip()
-                setor_qs = Setor.objects.filter(nome=setor_nome)
-                setor = filter_setores_by_scope(setor_qs, request.user).first()
-                if not setor:
-                    continue  # ignora se não existir/no escopo
+                nome = cell(row, 'Nome')
+                matricula = cell(row, 'Matrícula')
+                setor_nome = cell(row, 'Setor')
+                cargo = cell(row, 'Cargo')
+                funcao = cell(row, 'Função')
+                serie_in = cell(row, 'Série')
+                turma_in = cell(row, 'Turma')
+                turno_in = cell(row, 'Turno (cadastro)')
+                vinc_in = cell(row, 'Vínculo')
+                adm = row.get('Data de Admissão')
 
+                if not matricula:
+                    ign_sem_matricula += 1
+                    continue
+
+                if not setor_nome:
+                    ign_sem_setor += 1
+                    continue
+
+                if pd.isna(adm):
+                    ign_admissao_invalida += 1
+                    continue
+
+                # Resolver Setor pelo nome dentro do escopo do usuário
+                setor_qs = Setor.objects.filter(nome__iexact=setor_nome)
+                setor_qs = filter_setores_by_scope(setor_qs, request.user)
+                setor = setor_qs.first()
+                if not setor:
+                    ign_sem_setor += 1
+                    continue
+
+                # Normalizações/validações para bater com os choices do modelo
+                turno = TURNO_MAP.get(_norm(turno_in)) if turno_in else None
+                if turno_in and not turno:
+                    ajustados_turno += 1  # valor inválido → None
+
+                vinculo = VINC_MAP.get(_norm(vinc_in)) if vinc_in else None
+                if vinc_in and not vinculo:
+                    ajustados_vinculo += 1  # valor inválido → None
+
+                serie = serie_in if serie_in in SERIES_OK else None
+                if serie_in and serie is None:
+                    inval_series += 1
+
+                turma = turma_in.upper() if turma_in else None
+                turma = turma if (turma and turma in TURMAS_OK) else None
+                if turma_in and turma is None:
+                    inval_turmas += 1
+
+                # Monta dict exatamente como o modelo espera
                 funcionario_data = {
-                    'nome': str(row.get('Nome', '')).strip(),
-                    'cargo': str(row.get('Cargo', '')).strip(),
-                    'funcao': str(row.get('Função', '')).strip(),
-                    'data_admissao': row.get('Data de Admissão'),
+                    'nome': nome,
+                    'cargo': cargo,
+                    'funcao': funcao,
+                    'data_admissao': pd.to_datetime(adm).date(),
                     'setor': setor,
-                    'tem_planejamento': str(row.get('Tem Planejamento', '')).strip().lower() in ['sim', 'true', '1'],
-                    'horario_planejamento': str(row.get('Horário Planejamento', '')).strip() or None,
-                    'sabado_letivo': str(row.get('Sábado Letivo', '')).strip().lower() in ['sim', 'true', '1'],
-                    'data_nascimento': row.get('Data de Nascimento')
+                    'serie': serie,
+                    'turma': turma,
+                    'turno': turno,
+                    'tipo_vinculo': vinculo,
                 }
 
-                matricula = str(row.get('Matrícula', '')).strip()
-                if matricula:
-                    Funcionario.objects.update_or_create(
-                        matricula=matricula,
-                        defaults=funcionario_data
-                    )
-                    total_importados += 1
+                Funcionario.objects.update_or_create(
+                    matricula=matricula,
+                    defaults=funcionario_data
+                )
+                total_ok += 1
 
-            messages.success(request, f'{total_importados} funcionários foram importados com sucesso.')
+        # Mensagens finais
+        base_msg = f'{total_ok} funcionário(s) importado(s)/atualizado(s).'
+        avisos = []
+        if ign_sem_matricula: avisos.append(f'{ign_sem_matricula} sem Matrícula')
+        if ign_sem_setor: avisos.append(f'{ign_sem_setor} com Setor inexistente/fora de escopo')
+        if ign_admissao_invalida: avisos.append(f'{ign_admissao_invalida} com Data de Admissão inválida')
+        if ajustados_turno: avisos.append(f'{ajustados_turno} com Turno inválido (definido como vazio)')
+        if ajustados_vinculo: avisos.append(f'{ajustados_vinculo} com Vínculo inválido (definido como vazio)')
+        if inval_series: avisos.append(f'{inval_series} com Série inválida (definida como vazia)')
+        if inval_turmas: avisos.append(f'{inval_turmas} com Turma inválida (definida como vazia)')
 
-        except Exception as e:
-            messages.error(request, f'Ocorreu um erro ao importar o arquivo: {e}')
+        if avisos:
+            messages.warning(request, base_msg + " Avisos: " + "; ".join(avisos))
+        else:
+            messages.success(request, base_msg)
 
     return render(request, 'controle/importar_funcionarios.html')
+
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.shortcuts import render
+from django.db import transaction
+from datetime import time
+import pandas as pd
+import unicodedata
+import re
+
+from .models import Funcionario, HorarioTrabalho, Setor, filter_funcionarios_by_scope
+
+def _norm(s: str) -> str:
+    if s is None:
+        return ""
+    s = unicodedata.normalize("NFKD", str(s))
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.strip().lower()
+
+def _parse_turno(value: str):
+    """
+    Normaliza para choices do modelo: 'Manhã' ou 'Tarde'.
+    Aceita variações: manha, manhã, m, matutino -> Manhã | tarde, t, vespertino -> Tarde
+    """
+    v = _norm(value)
+    if not v:
+        return None
+    if v in {"manha", "manhã", "m", "matutino", "man", "am"}:
+        return "Manhã"
+    if v in {"tarde", "t", "vespertino", "tar", "pm"}:
+        return "Tarde"
+    return None
+
+_TIME_PATTERNS = [
+    r"^\s*(\d{1,2})[:hH\.](\d{2})\s*$",   # 8:30, 08:30, 8h30, 8.30
+    r"^\s*(\d{1,2})\s*[:hH]\s*$",         # 8:, 8h  -> minutos = 00
+    r"^\s*(\d{1,2})(\d{2})\s*$",          # 0830, 930 -> HHMM
+    r"^\s*(\d{1,2})\s*$",                 # 8 -> 08:00
+]
+
+def _parse_time(value):
+    """
+    Aceita '08:00', '8:00', '08:00:00', '8h30', '0830', '8', '8h', etc.
+    Retorna datetime.time ou None.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+
+    # tenta formatos padrão do pandas/excel (p.ex. já vem como datetime.time)
+    if hasattr(value, "hour") and hasattr(value, "minute"):
+        try:
+            return time(int(value.hour), int(value.minute))
+        except Exception:
+            pass
+
+    # remove segundos se vier “HH:MM:SS”
+    if re.match(r"^\d{1,2}:\d{2}:\d{2}$", s):
+        s = s[:5]  # HH:MM
+
+    for pat in _TIME_PATTERNS:
+        m = re.match(pat, s)
+        if not m:
+            continue
+        if pat == _TIME_PATTERNS[0]:
+            hh, mm = int(m.group(1)), int(m.group(2))
+        elif pat == _TIME_PATTERNS[1]:
+            hh, mm = int(m.group(1)), 0
+        elif pat == _TIME_PATTERNS[2]:
+            raw_h, raw_m = m.group(1), m.group(2)
+            hh, mm = int(raw_h), int(raw_m)
+        else:  # only hour
+            hh, mm = int(m.group(1)), 0
+
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return time(hh, mm)
+        return None
+
+    return None
+
+def _pick_col(df, *candidatos):
+    """
+    Retorna o nome real da coluna no df que corresponda a qualquer um dos candidatos (case/acentos-insensitive).
+    Ex.: _pick_col(df, 'Matrícula', 'matricula', 'matricula*') -> 'Matrícula'
+    """
+    norm_map = {_norm(c): c for c in df.columns}
+    for c in candidatos:
+        c_norm = _norm(c)
+        if c_norm in norm_map:
+            return norm_map[c_norm]
+    return None
 
 @login_required
 def importar_horarios_trabalho(request):
     if request.method == 'POST' and request.FILES.get('arquivo_horarios'):
         arquivo = request.FILES['arquivo_horarios']
+        nome = arquivo.name.lower()
 
-        if not arquivo.name.endswith(('.xlsx', '.xls', '.csv')):
+        # aceita .xlsx, .xls, .csv
+        if not nome.endswith(('.xlsx', '.xls', '.csv')):
             messages.error(request, "Envie um arquivo .xlsx, .xls ou .csv válido.")
             return render(request, 'controle/importar_horarios.html')
 
+        # leitura com fallbacks de engine
         try:
-            if arquivo.name.endswith('.csv'):
+            if nome.endswith('.csv'):
                 df = pd.read_csv(arquivo)
-            else:
-                df = pd.read_excel(arquivo)
-
-            total_importados = 0
-
-            for _, row in df.iterrows():
-                nome = str(row.get('nome')).strip()
-                turno = str(row.get('turno')).strip().capitalize()
-                funcionario = filter_funcionarios_by_scope(
-                    Funcionario.objects.filter(nome__iexact=nome),
-                    request.user
-                ).first()
-
-                if funcionario:
-                    horario_inicio = datetime.strptime(str(row.get('horario_inicio')), '%H:%M:%S').time()
-                    horario_fim = datetime.strptime(str(row.get('horario_fim')), '%H:%M:%S').time()
-
-                    HorarioTrabalho.objects.update_or_create(
-                        funcionario=funcionario,
-                        turno=turno,
-                        defaults={'horario_inicio': horario_inicio, 'horario_fim': horario_fim}
-                    )
-                    total_importados += 1
-                else:
-                    messages.warning(request, f'Funcionário fora do escopo ou não encontrado: {nome}')
-
-            messages.success(request, f'{total_importados} horários de trabalho importados com sucesso.')
-
+            elif nome.endswith('.xlsx'):
+                try:
+                    import openpyxl  # noqa
+                except ImportError:
+                    messages.error(request, "Faltando 'openpyxl' para .xlsx. Instale: pip install openpyxl (ou envie CSV).")
+                    return render(request, 'controle/importar_horarios.html')
+                df = pd.read_excel(arquivo, engine='openpyxl')
+            else:  # .xls
+                try:
+                    import xlrd  # noqa
+                except ImportError:
+                    messages.error(request, "Faltando 'xlrd' para .xls. Instale: pip install xlrd (ou converta para .xlsx/CSV).")
+                    return render(request, 'controle/importar_horarios.html')
+                df = pd.read_excel(arquivo, engine='xlrd')
         except Exception as e:
-            messages.error(request, f'Erro ao importar horários: {e}')
+            messages.error(request, f'Erro ao abrir arquivo: {e}')
+            return render(request, 'controle/importar_horarios.html')
+
+        # normaliza cabeçalhos
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # tenta localizar colunas (flexível)
+        col_matricula = _pick_col(df, 'Matrícula', 'matricula')
+        col_nome      = _pick_col(df, 'Nome', 'nome')
+        col_turno     = _pick_col(df, 'Turno', 'turno')
+        col_inicio    = _pick_col(df, 'Horário Início', 'Horario Inicio', 'horario_inicio', 'inicio', 'início', 'hora inicio')
+        col_fim       = _pick_col(df, 'Horário Fim', 'Horario Fim', 'horario_fim', 'fim', 'hora fim')
+
+        # requisitos mínimos
+        if not col_turno or not col_inicio or not col_fim:
+            messages.error(request, "Colunas obrigatórias ausentes: 'Turno', 'Horário Início' e 'Horário Fim'.")
+            return render(request, 'controle/importar_horarios.html')
+
+        if not col_matricula and not col_nome:
+            messages.error(request, "Informe ao menos uma coluna de identificação do servidor: 'Matrícula' ou 'Nome'.")
+            return render(request, 'controle/importar_horarios.html')
+
+        total_ok = 0
+        warn_func_nao_encontrado = 0
+        warn_ambiguidade = 0
+        warn_turno_invalido = 0
+        warn_hora_invalida = 0
+
+        # opcional: usar Setor para desambiguar nomes
+        col_setor = _pick_col(df, 'Setor')
+
+        def _cell(row, col):
+            val = row.get(col)
+            if pd.isna(val):
+                return ""
+            return str(val).strip()
+
+        with transaction.atomic():
+            for _, row in df.iterrows():
+                # Identificação do funcionário
+                func_qs = Funcionario.objects.all()
+
+                if col_matricula:
+                    matricula = _cell(row, col_matricula)
+                    if matricula:
+                        func_qs = func_qs.filter(matricula__iexact=matricula)
+                    else:
+                        func_qs = Funcionario.objects.none()
+                else:
+                    nome_func = _cell(row, col_nome)
+                    func_qs = func_qs.filter(nome__iexact=nome_func)
+
+                # Restringe por escopo do usuário
+                func_qs = filter_funcionarios_by_scope(func_qs, request.user)
+
+                # Se nome, tentar desambiguar por setor (se existir coluna)
+                if col_matricula is None and col_setor:
+                    setor_nome = _cell(row, col_setor)
+                    if setor_nome:
+                        func_qs = func_qs.filter(setor__nome__iexact=setor_nome)
+
+                count = func_qs.count()
+                if count == 0:
+                    warn_func_nao_encontrado += 1
+                    continue
+                if count > 1:
+                    warn_ambiguidade += 1
+                    continue
+
+                funcionario = func_qs.first()
+
+                # Turno
+                turno_raw = _cell(row, col_turno)
+                turno = _parse_turno(turno_raw)
+                if turno is None:
+                    warn_turno_invalido += 1
+                    continue
+
+                # Horários
+                ini = _parse_time(row.get(col_inicio))
+                fim = _parse_time(row.get(col_fim))
+                if not ini or not fim:
+                    warn_hora_invalida += 1
+                    continue
+
+                # grava (1 registro por funcionario+turno)
+                HorarioTrabalho.objects.update_or_create(
+                    funcionario=funcionario,
+                    turno=turno,
+                    defaults={'horario_inicio': ini, 'horario_fim': fim}
+                )
+                total_ok += 1
+
+        # mensagens finais
+        base_msg = f"{total_ok} horário(s) importado(s)/atualizado(s)."
+        avisos = []
+        if warn_func_nao_encontrado: avisos.append(f"{warn_func_nao_encontrado} funcionário(s) fora do escopo/não encontrado(s)")
+        if warn_ambiguidade: avisos.append(f"{warn_ambiguidade} linha(s) ambígua(s) (mais de um funcionário)")
+        if warn_turno_invalido: avisos.append(f"{warn_turno_invalido} com turno inválido (use Manhã/Tarde)")
+        if warn_hora_invalida: avisos.append(f"{warn_hora_invalida} com horário inválido")
+
+        if avisos:
+            messages.warning(request, base_msg + " Avisos: " + "; ".join(avisos))
+        else:
+            messages.success(request, base_msg)
 
     return render(request, 'controle/importar_horarios.html')
+
 
 # =====================================================================
 # Capa do livro de ponto
@@ -1575,3 +1885,394 @@ class PainelLogoutView(LogoutView):
     http_method_names = ["get", "post", "options", "head"]
     def get(self, request, *args, **kwargs):
         return self.post(request, *args, **kwargs)
+
+def _fmt(t: time | None) -> str:
+    return t.strftime('%H:%M') if t else ''
+
+def _parse_hhmm(value: str | None) -> time | None:
+    """Aceita '', '08:00', '8:00', '08:00:00'."""
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # HH:MM:SS -> HH:MM
+    if len(s) == 8 and s[2] == ':' and s[5] == ':':
+        s = s[:5]
+    try:
+        dt = datetime.strptime(s, '%H:%M')
+        return time(dt.hour, dt.minute)
+    except ValueError:
+        return None
+
+
+@login_required
+def listar_horarios_funcionarios(request):
+    """
+    Lista todos os funcionários visíveis ao usuário + horários (Manhã/Tarde).
+    Possui busca por nome e filtro por setor.
+    """
+    q = (request.GET.get('q') or '').strip()
+    setor_id = (request.GET.get('setor') or '').strip()
+
+    base_qs = Funcionario.objects.select_related('setor').prefetch_related(
+        Prefetch('horariotrabalho_set', queryset=HorarioTrabalho.objects.order_by('turno'))
+    ).order_by(Lower('nome'))
+
+    # respeita escopo
+    base_qs = filter_funcionarios_by_scope(base_qs, request.user)
+
+    if q:
+        base_qs = base_qs.filter(nome__icontains=q)
+    if setor_id:
+        base_qs = base_qs.filter(setor_id=setor_id)
+
+    linhas = []
+    for f in base_qs:
+        # pega 2 registros (um manhã, um tarde)
+        manha = next((h for h in f.horariotrabalho_set.all() if h.turno == 'Manhã'), None)
+        tarde = next((h for h in f.horariotrabalho_set.all() if h.turno == 'Tarde'), None)
+
+        linhas.append({
+            "funcionario": f,                     # para usar id/nome no template
+            "nome": f.nome,
+            "setor": f.setor.nome if f.setor else "",
+            "turno_cadastro": f.turno or "",
+            "vinculo": f.tipo_vinculo or "",
+            "m_ini": _fmt(manha.horario_inicio) if manha else "",
+            "m_fim": _fmt(manha.horario_fim) if manha else "",
+            "t_ini": _fmt(tarde.horario_inicio) if tarde else "",
+            "t_fim": _fmt(tarde.horario_fim) if tarde else "",
+        })
+
+    setores = filter_funcionarios_by_scope(
+        Funcionario.objects.select_related('setor'), request.user
+    ).values_list('setor_id', 'setor__nome').distinct().order_by('setor__nome')
+
+    context = {
+        "linhas": linhas,
+        "setores": setores,
+        "filtros": {"q": q, "setor": setor_id},
+    }
+    return render(request, "controle/listar_horarios_funcionarios.html", context)
+
+
+@login_required
+def editar_horarios_funcionario(request, funcionario_id: int):
+    """
+    Edita os dois turnos (Manhã/Tarde) de um funcionário em um único formulário.
+    - Se um turno vier vazio (início e fim), o registro é removido.
+    - Caso contrário, é criado/atualizado via update_or_create.
+    """
+    f = get_object_or_404(Funcionario, id=funcionario_id)
+
+    # checa escopo
+    if not filter_funcionarios_by_scope(Funcionario.objects.filter(id=f.id), request.user).exists():
+        messages.error(request, "Você não tem permissão para editar este servidor.")
+        return redirect("listar_horarios_funcionarios")
+
+    # existentes
+    manha = HorarioTrabalho.objects.filter(funcionario=f, turno='Manhã').first()
+    tarde = HorarioTrabalho.objects.filter(funcionario=f, turno='Tarde').first()
+
+    if request.method == "POST":
+        m_ini = _parse_hhmm(request.POST.get("manha_inicio"))
+        m_fim = _parse_hhmm(request.POST.get("manha_fim"))
+        t_ini = _parse_hhmm(request.POST.get("tarde_inicio"))
+        t_fim = _parse_hhmm(request.POST.get("tarde_fim"))
+
+        # Manhã
+        if m_ini and m_fim:
+            HorarioTrabalho.objects.update_or_create(
+                funcionario=f, turno='Manhã',
+                defaults={"horario_inicio": m_ini, "horario_fim": m_fim}
+            )
+        else:
+            HorarioTrabalho.objects.filter(funcionario=f, turno='Manhã').delete()
+
+        # Tarde
+        if t_ini and t_fim:
+            HorarioTrabalho.objects.update_or_create(
+                funcionario=f, turno='Tarde',
+                defaults={"horario_inicio": t_ini, "horario_fim": t_fim}
+            )
+        else:
+            HorarioTrabalho.objects.filter(funcionario=f, turno='Tarde').delete()
+
+        messages.success(request, "Horários atualizados com sucesso.")
+        return redirect("listar_horarios_funcionarios")
+
+    context = {
+        "f": f,
+        "m_ini": _fmt(manha.horario_inicio) if manha else "",
+        "m_fim": _fmt(manha.horario_fim) if manha else "",
+        "t_ini": _fmt(tarde.horario_inicio) if tarde else "",
+        "t_fim": _fmt(tarde.horario_fim) if tarde else "",
+    }
+    return render(request, "controle/editar_horarios_funcionario.html", context)
+
+
+# ---------- Normalizador de horários livres ----------
+_HHMM_TOKEN = re.compile(r'(\d{1,2})(?::|h|H|\.|)?(\d{0,2})')
+
+def _fmt_hhmm(h: str, m: str) -> str | None:
+    if m == "" or m is None:
+        m = "00"
+    try:
+        hh = int(h)
+        mm = int(m)
+    except ValueError:
+        return None
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return None
+    return f"{hh:02d}:{mm:02d}"
+
+def normalizar_horario_livre(texto: str) -> str:
+    """
+    Converte entradas como:
+      '17h25min às 20h40min', '17:25 as 20:40', '17 25 - 20 40', '17-20'
+    para '17:25–20:40' (EN DASH). Se achar só um horário, retorna 'HH:MM'.
+    Se nada for reconhecido, retorna ''.
+    """
+    if not texto:
+        return ""
+    s = str(texto).strip().lower()
+
+    # normaliza conectores para '-'
+    s = s.replace('—', '-').replace('–', '-')
+    s = re.sub(r'\b(às|ás|as|ate|até|a)\b', '-', s)
+    # remove rótulos
+    s = re.sub(r'\b(min|mins|minuto|minutos|hora|horas|hs?)\b', '', s)
+    s = s.replace(' ', '')
+
+    # extrai pares de hora/minuto com minutos opcionais
+    tokens = _HHMM_TOKEN.findall(s)
+    horarios = []
+    for h, m in tokens:
+        hhmm = _fmt_hhmm(h, m)
+        if hhmm:
+            horarios.append(hhmm)
+    if not horarios:
+        return ""
+
+    # Se houver separador '-', tenta separar blocos
+    if '-' in s:
+        blocos = s.split('-', 1)
+        # conta quantos tokens em cada bloco para pegar o primeiro horário de cada lado
+        esquerdo = _HHMM_TOKEN.findall(blocos[0])
+        direito  = _HHMM_TOKEN.findall(blocos[1])
+        h_ini = _fmt_hhmm(*esquerdo[0]) if esquerdo else None
+        h_fim = _fmt_hhmm(*direito[0])  if direito  else None
+        if h_ini and h_fim:
+            return f"{h_ini}–{h_fim}"
+        if h_ini:
+            return h_ini
+        return horarios[0]
+
+    # sem '-', use os dois primeiros horários (se houver)
+    if len(horarios) >= 2:
+        return f"{horarios[0]}–{horarios[1]}"
+    return horarios[0]
+
+
+# ---------- PLANEJAMENTO EM LOTE ----------
+@login_required
+def planejamento_lote(request):
+    """
+    Define (em lote) o 'horario_planejamento' para todos os servidores
+    com tem_planejamento=True, respeitando o escopo do usuário.
+    Aceita formatos livres (ex.: '17h25min ás 20h40min').
+    """
+    if request.method == 'POST':
+        # pode vir como 'horario' (form único) ou múltiplos campos 'horario' (por segurança)
+        candidatos = [v.strip() for v in request.POST.getlist('horario') if v.strip()]
+        horario_bruto = candidatos[0] if candidatos else (request.POST.get('horario') or '').strip()
+        substituir = bool(request.POST.get('substituir'))
+
+        horario_norm = normalizar_horario_livre(horario_bruto)
+        if not horario_norm:
+            messages.error(request, "Informe um intervalo válido, ex.: 08:00–10:00 (aceita '08h às 10h').")
+            return render(request, 'controle/planejamento_lote.html', {
+                'filtros': {},
+                'exemplo': '08:00–10:00',
+            })
+
+        qs = filter_funcionarios_by_scope(
+            Funcionario.objects.filter(tem_planejamento=True),
+            request.user
+        )
+
+        if not substituir:
+            qs = qs.filter(Q(horario_planejamento__isnull=True) | Q(horario_planejamento__exact=''))
+
+        atualizados = qs.update(horario_planejamento=horario_norm)
+
+        if atualizados:
+            messages.success(request, f"Horário de planejamento aplicado a {atualizados} servidor(es): {horario_norm}.")
+        else:
+            if substituir:
+                messages.info(request, "Nenhum servidor com planejamento no seu escopo.")
+            else:
+                messages.info(request, "Todos no seu escopo já possuíam horário de planejamento.")
+
+        return redirect('controle:listar_horarios_funcionarios')
+
+    # GET
+    return render(request, 'controle/planejamento_lote.html', {
+        'filtros': {},
+        'exemplo': '08:00–10:00',
+    })
+
+
+# ---------- SELECIONAR FUNCIONÁRIOS (habilitar/remover) ----------
+@login_required
+def selecionar_funcionarios_planejamento(request):
+    """
+    Lista funcionários para habilitar/desabilitar 'tem_planejamento' em massa.
+    Opcionalmente grava um 'horario_planejamento' padrão nos habilitados.
+    """
+    setores = filter_setores_by_scope(Setor.objects.all(), request.user).order_by('nome')
+    qs = (filter_funcionarios_by_scope(
+            Funcionario.objects.select_related('setor'),
+            request.user
+         )
+         .order_by(Lower('nome')))
+
+    setor_id = (request.GET.get('setor') or '').strip()
+    busca = (request.GET.get('q') or '').strip()
+
+    if setor_id:
+        qs = qs.filter(setor_id=setor_id)
+    if busca:
+        qs = qs.filter(nome__icontains=busca)
+
+    if request.method == 'POST':
+        ids = request.POST.getlist('funcionarios')          # todos os checkboxes marcados
+        acao = request.POST.get('acao')
+
+        # no template há 2 campos "horario_padrao" (topo e rodapé):
+        hp_cands = [v.strip() for v in request.POST.getlist('horario_padrao') if v.strip()]
+        horario_raw = hp_cands[0] if hp_cands else (request.POST.get('horario_padrao') or '').strip()
+        horario_norm = normalizar_horario_livre(horario_raw)
+
+        if not ids:
+            messages.warning(request, "Nenhum funcionário selecionado.")
+            return redirect('controle:selecionar_funcionarios_planejamento')
+
+        alvo_qs = filter_funcionarios_by_scope(Funcionario.objects.filter(id__in=ids), request.user)
+
+        with transaction.atomic():
+            if acao == 'habilitar':
+                if horario_norm:
+                    n = alvo_qs.update(tem_planejamento=True, horario_planejamento=horario_norm)
+                    messages.success(request, f"Planejamento habilitado para {n} funcionário(s). Horário: {horario_norm}.")
+                else:
+                    n = alvo_qs.update(tem_planejamento=True)
+                    messages.success(request, f"Planejamento habilitado para {n} funcionário(s).")
+            elif acao == 'remover':
+                n = alvo_qs.update(tem_planejamento=False, horario_planejamento=None)
+                messages.success(request, f"Planejamento removido de {n} funcionário(s).")
+            else:
+                messages.error(request, "Ação inválida.")
+                # preserva filtros
+                base = reverse('controle:selecionar_funcionarios_planejamento')
+                query = urlencode({k: v for k, v in [('setor', setor_id), ('q', busca)] if v})
+                return redirect(f"{base}?{query}" if query else base)
+
+        # preserva filtros na volta
+        base = reverse('controle:selecionar_funcionarios_planejamento')
+        query = urlencode({k: v for k, v in [('setor', setor_id), ('q', busca)] if v})
+        return redirect(f"{base}?{query}" if query else base)
+
+    context = {
+        'funcionarios': qs,
+        'setores': setores,
+        'filtros': {'setor': setor_id, 'q': busca},
+    }
+    return render(request, 'controle/selecionar_funcionarios_planejamento.html', context)
+
+@login_required
+def excluir_folhas_selecionadas(request):
+    if request.method != 'POST':
+        return redirect('controle:listar_folhas')  # volte para a listagem
+
+    ids = request.POST.getlist('folhas')
+    if not ids:
+        messages.warning(request, 'Nenhuma folha selecionada.')
+        return redirect('controle:listar_folhas')
+
+    # Filtra as folhas pelos IDs enviados
+    qs = (FolhaFrequencia.objects
+          .select_related('funcionario')
+          .filter(id__in=ids))
+
+    # (Opcional, mas recomendado) restringe por escopo do usuário
+    funcionarios_no_escopo = filter_funcionarios_by_scope(
+        Funcionario.objects.all(), request.user
+    )
+    qs = qs.filter(funcionario__in=funcionarios_no_escopo)
+
+    n = qs.count()
+    qs.delete()
+
+    messages.success(request, f'{n} folha(s) excluída(s).')
+    return redirect('controle:listar_folhas')
+
+@login_required
+def sabados_letivos(request):
+    """
+    Página única para cadastrar um Sábado Letivo e listar todos os já cadastrados.
+    """
+    if request.method == 'POST':
+        # Exclusão individual (mesma página)
+        if request.POST.get('acao') == 'excluir' and request.POST.get('id'):
+            try:
+                SabadoLetivo.objects.filter(id=request.POST['id']).delete()
+                messages.success(request, "Sábado letivo removido.")
+            except Exception:
+                messages.error(request, "Não foi possível remover este dia.")
+            return redirect('controle:sabados_letivos')
+
+        # Cadastro
+        data_str = (request.POST.get('data') or '').strip()
+        descricao = (request.POST.get('descricao') or '').strip()
+
+        if not data_str:
+            messages.error(request, "Informe a data.")
+            return redirect('controle:sabados_letivos')
+
+        try:
+            d = date.fromisoformat(data_str)  # YYYY-MM-DD
+        except ValueError:
+            messages.error(request, "Data inválida. Use o seletor de data.")
+            return redirect('controle:sabados_letivos')
+
+        # Garante que é um sábado (segunda=0 ... sábado=5)
+        if d.weekday() != 5:
+            messages.error(request, "A data informada não é sábado. Escolha um sábado.")
+            return redirect('controle:sabados_letivos')
+
+        try:
+            obj, created = SabadoLetivo.objects.get_or_create(
+                data=d,
+                defaults={'descricao': descricao or None}
+            )
+            if created:
+                messages.success(request, "Sábado letivo cadastrado com sucesso.")
+            else:
+                # Atualiza descrição, se enviada
+                if descricao:
+                    obj.descricao = descricao
+                    obj.save(update_fields=['descricao'])
+                    messages.success(request, "Sábado letivo já existia; descrição atualizada.")
+                else:
+                    messages.info(request, "Este sábado letivo já estava cadastrado.")
+        except IntegrityError:
+            messages.error(request, "Este sábado letivo já está cadastrado.")
+        except Exception:
+            messages.error(request, "Não foi possível cadastrar o sábado letivo.")
+
+        return redirect('controle:sabados_letivos')
+
+    sabados = SabadoLetivo.objects.all().order_by('data')
+    return render(request, 'controle/sabados_letivos.html', {'sabados': sabados})

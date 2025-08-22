@@ -90,6 +90,13 @@ urlpatterns = [
     path('recessos/', views.recessos_list, name='recessos_list'),
     path('recessos/<int:recesso_id>/editar/', views.recesso_edit, name='recesso_edit'),
     path('recessos/<int:recesso_id>/excluir/', views.recesso_delete, name='recesso_delete'),
+
+    path("horarios/", views.listar_horarios_funcionarios, name="listar_horarios_funcionarios"),
+    path("horarios/<int:funcionario_id>/editar/", views.editar_horarios_funcionario, name="editar_horarios_funcionarios"),
+    path('planejamento/lote/', views.planejamento_lote, name='planejamento_lote'),
+    path('planejamento/selecionar/', views.selecionar_funcionarios_planejamento, name='selecionar_funcionarios_planejamento'),
+    path('folhas/excluir-selecionadas/', views.excluir_folhas_selecionadas, name='excluir_folhas_selecionadas'),
+    path('sabados-letivos/', views.sabados_letivos, name='sabados_letivos'),
 ]
 
 
