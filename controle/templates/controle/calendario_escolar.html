@@ -135,7 +135,8 @@
     {% endif %}
   </div>
 
-  <!-- Formulário de novo evento -->
+  <!-- Formulário de novo evento (só SUPERADMIN) -->
+  {% if request.user.is_superuser %}
   <div class="card card-clean p-3 mb-3">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h2 class="h6 m-0"><i class="fa-solid fa-plus me-1"></i>Novo evento</h2>
@@ -171,8 +172,9 @@
       </div>
     </form>
   </div>
+  {% endif %}
 
-  <!-- Legenda -->
+  <!-- Legenda (para todos) -->
   <div class="card card-clean p-3 mb-3">
     <div class="legend d-flex flex-wrap gap-2 align-items-center">
       <span class="lbl me-2">Legenda:</span>
@@ -186,7 +188,7 @@
     </div>
   </div>
 
-  <!-- Calendário -->
+  <!-- Calendário (para todos; excluir só para superadmin) -->
   <div class="card card-clean p-3">
     <div class="calendar-grid mb-2">
       <div class="cal-head fw-semibold">Dom</div>
@@ -212,7 +214,7 @@
                     {% for e in evs %}
                       <div class="evt evt-{{ e.categoria|default:'OUTRO' }}">
                         {{ e.titulo }}
-                        {% if e.pk %}
+                        {% if request.user.is_superuser and e.pk %}
                           <a class="text-danger text-decoration-none ms-1" title="Excluir"
                              href="{% url 'controle:calendario_excluir' e.pk %}"
                              onclick="return confirm('Excluir este evento?');">
