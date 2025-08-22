@@ -37,7 +37,7 @@ from .forms import (
 from .models import (
     Prefeitura, Secretaria, Orgao, Setor, Funcionario,
     Feriado, HorarioTrabalho, SabadoLetivo, FolhaFrequencia, UserScope,
-    RecessoFuncionario, NivelAcesso,
+    RecessoFuncionario, NivelAcesso,AcessoOrgao, AcessoPrefeitura, AcessoSecretaria, AcessoSetor,
 )
 
 # ---- permissões/escopo ----
